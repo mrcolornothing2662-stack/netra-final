@@ -29,7 +29,6 @@ Architecture:
   [Dual Audit Trail] — Recorded in ArmorIQ log + CyberDrishti SHA-256 chain
 """
 import asyncio
-import hashlib
 import json
 import logging
 import uuid
@@ -51,6 +50,15 @@ logger = logging.getLogger(__name__)
 # ── MCP identifier registered in ArmorIQ platform ───────────────────────────
 
 CYBERDRISHTI_MCP = "cyberdrishti-investigation-mcp"
+
+# Actions with real-world consequence. Analytical tools are not in this set.
+HIGH_IMPACT_ACTIONS = frozenset({
+    "quarantine_account",
+    "freeze_account",
+    "modify_network_control_config",
+    "block_ip",
+    "disable_device",
+})
 
 # ── Authorization Scope Declaration (CSRG-IAP Plan) ─────────────────────────
 
@@ -169,24 +177,41 @@ class AutonomousInvestigationAgent:
         self.intent_token = None
         self.plan_capture = None
         self._client = armoriq()
-        self._IntentMismatch = get_intent_mismatch_exception()
+        self._IntentMismatch = get_intent_mismatch_exception(self._client)
         self._discovered_entities: dict = {}
         self._discovered_correlations: dict = {}
+        self._quarantine_skipped_reason: str | None = None
+        self._firewall_skipped_reason: str | None = None
+        self.case_snapshot: dict = {}
+        self.investigation_plan: list[dict] = []
+        self.final_report: dict | None = None
 
     # ── Public Lifecycle Methods ─────────────────────────────────────────────
 
     async def run(self) -> dict:
         """
         Start the autonomous ReAct investigation from scratch.
+
+        The case MUST load before any investigative action runs. If it cannot be
+        loaded the agent hard-stops with zero actions executed — it never
+        proceeds against an unknown/empty case state.
         """
+        case = await self._load_case_or_stop()
+        if case is None:
+            return self._build_summary()
+
         await self._set_status("investigating")
         await self._persist_session()
 
         try:
-            # 1. Declare Authorization Plan to ArmorIQ
+            # 1. Read the shared case state + persisted findings and declare the
+            #    investigation plan (what the agent is trying to establish).
+            await self._declare_investigation_plan()
+
+            # 2. Declare Authorization Plan to ArmorIQ
             await self._declare_intent_plan()
 
-            # 2. Launch Autonomous ReAct Loop
+            # 3. Launch Autonomous ReAct Loop
             await self._run_react_loop(max_turns=8)
 
         except Exception as exc:
@@ -199,7 +224,200 @@ class AutonomousInvestigationAgent:
             )
             await self._set_status("failed")
 
+        if self.status in ("completed", "awaiting_approval"):
+            await self._finalize_investigation()
+
         return self._build_summary()
+
+    async def _load_case_or_stop(self):
+        """
+        Resolve the canonical Case for this agent. Returns the Case row or None.
+
+        On failure it records a CASE_LOAD_FAILED action, sets status
+        ``failed_case_load`` and returns None so the caller stops immediately —
+        no investigative action is executed.
+        """
+        from sqlalchemy import select
+
+        from db.models import Case
+
+        case = None
+        try:
+            case = await self.db.get(Case, uuid.UUID(str(self.case_id)))
+        except (TypeError, ValueError, AttributeError):
+            case = None
+
+        if case is None:
+            # Fall back to a human-friendly case number / title match.
+            try:
+                res = await self.db.execute(
+                    select(Case).where(
+                        (Case.case_number == str(self.case_id))
+                        | (Case.title.ilike(f"%{self.case_id}%"))
+                    )
+                )
+                case = res.scalars().first()
+            except Exception as exc:
+                logger.warning(f"[Agent] Case lookup failed: {exc}")
+                case = None
+
+        if case is None:
+            await self._log_action(
+                "CASE_LOAD_FAILED",
+                (
+                    f"Investigation stopped because the requested case could not be "
+                    f"loaded: {self.case_id}. Zero investigative actions executed."
+                ),
+                {
+                    "requested_case_id": self.case_id,
+                    "actions_executed": 0,
+                    "outcome": "case_load_failed",
+                },
+                status="failed",
+            )
+            await self._set_status("failed_case_load")
+            return None
+
+        # Bind the canonical UUID so every downstream tool queries the real case.
+        self.case_id = str(case.id)
+        return case
+
+    # ── Investigation plan + final report (consumes the shared case state) ───
+
+    async def _gather_case_state(self) -> dict:
+        """Read the canonical case state and the persisted intelligence."""
+        from sqlalchemy import func, select
+
+        from db.models import (
+            Entity,
+            EvidenceEvent,
+            EvidenceFile,
+            InvestigationFinding,
+            Relationship,
+        )
+
+        case_uuid = uuid.UUID(str(self.case_id))
+
+        async def _count(model, *conditions) -> int:
+            stmt = select(func.count()).select_from(model).where(model.case_id == case_uuid, *conditions)
+            return int((await self.db.execute(stmt)).scalar() or 0)
+
+        observed_rels = await _count(Relationship, Relationship.epistemic_status == "OBSERVED")
+        inferred_rels = await _count(Relationship, Relationship.epistemic_status == "INFERRED")
+
+        findings = (await self.db.execute(
+            select(InvestigationFinding).where(InvestigationFinding.case_id == case_uuid)
+        )).scalars().all()
+
+        def _by_type(*types: str) -> list[dict]:
+            return [
+                {"title": f.title, "severity": f.severity, "type": f.finding_type, "id": str(f.id)}
+                for f in findings if f.finding_type in types
+            ]
+
+        return {
+            "evidence": await _count(EvidenceFile),
+            "events": await _count(EvidenceEvent),
+            "entities": await _count(Entity),
+            "relationships": observed_rels + inferred_rels,
+            "observed_relationships": observed_rels,
+            "inferred_relationships": inferred_rels,
+            "findings": len(findings),
+            "high_priority": sum(1 for f in findings if f.severity in ("HIGH", "CRITICAL")),
+            "uncertainties": _by_type("UNCERTAINTY"),
+            "next_best_actions": _by_type("NEXT_BEST_ACTION"),
+            "analytical_findings": [
+                {"title": f.title, "severity": f.severity, "type": f.finding_type}
+                for f in findings if f.finding_type not in ("UNCERTAINTY", "NEXT_BEST_ACTION")
+            ],
+        }
+
+    async def _declare_investigation_plan(self):
+        """Build and record the plan of what the agent is trying to establish."""
+        snapshot = await self._gather_case_state()
+        self.case_snapshot = snapshot
+
+        non_routine_events = snapshot["events"] > 0
+        has_financial = snapshot["observed_relationships"] > 0
+        has_links = snapshot["relationships"] > 0
+        has_findings = snapshot["findings"] > 0
+        has_actions = len(snapshot["next_best_actions"]) > 0
+
+        def _status(done: bool, started: bool) -> str:
+            return "complete" if done else ("in_progress" if started else "pending")
+
+        self.investigation_plan = [
+            {"id": 1, "objective": "Establish incident timeline",
+             "status": _status(non_routine_events, non_routine_events)},
+            {"id": 2, "objective": "Reconstruct financial movement",
+             "status": _status(has_financial, non_routine_events)},
+            {"id": 3, "objective": "Resolve account/device relationships",
+             "status": _status(has_links, non_routine_events)},
+            {"id": 4, "objective": "Evaluate competing hypotheses",
+             "status": _status(has_findings, non_routine_events)},
+            {"id": 5, "objective": "Identify evidence gaps",
+             "status": _status(has_actions, has_findings)},
+            {"id": 6, "objective": "Recommend next-best actions",
+             "status": _status(has_actions, has_findings)},
+        ]
+
+        await self._log_action(
+            "INVESTIGATION_PLAN",
+            "Investigation plan derived from the shared case state and persisted findings",
+            {"case_snapshot": snapshot, "plan": self.investigation_plan},
+            status="authorized",
+        )
+
+    async def _finalize_investigation(self):
+        """Compose the terminal report: observed / analytical / unresolved /
+        recommended / governance, all from real persisted state and actions."""
+        if self.final_report is not None:
+            return
+        snapshot = self.case_snapshot or await self._gather_case_state()
+
+        executed_high_impact = [
+            a for a in self.actions
+            if a["action_type"] == "ACTION_EXECUTED"
+            and (a.get("details") or {}).get("action") in HIGH_IMPACT_ACTIONS
+        ]
+        blocked = [a for a in self.actions if a["action_type"] == "GOVERNANCE_BLOCK"]
+
+        self.final_report = {
+            "case_id": self.case_id,
+            "observed": [
+                f"{snapshot['evidence']} evidence artifact(s)",
+                f"{snapshot['events']} event(s)",
+                f"{snapshot['entities']} entity(ies)",
+                f"{snapshot['observed_relationships']} observed relationship(s)",
+            ],
+            "analytical_findings": snapshot["analytical_findings"][:20],
+            "unresolved": [
+                *[u["title"] for u in snapshot["uncertainties"]],
+                *(
+                    ["Account/device relationship unresolved"]
+                    if snapshot["inferred_relationships"] else []
+                ),
+            ][:20],
+            "recommended_next_actions": [a["title"] for a in snapshot["next_best_actions"]][:10],
+            "governance": {
+                "high_impact_actions_executed": len(executed_high_impact),
+                "blocked_actions": len(blocked),
+                "pending_approvals": 1 if self.pending_hold else 0,
+                "analytical_actions_executed": sum(
+                    1 for a in self.actions
+                    if a["action_type"] == "ACTION_EXECUTED"
+                    and (a.get("details") or {}).get("action") not in HIGH_IMPACT_ACTIONS
+                ),
+            },
+            "investigation_plan": self.investigation_plan,
+        }
+
+        await self._log_action(
+            "INVESTIGATION_SUMMARY",
+            "Investigation complete — observed / analytical / unresolved / recommended / governance",
+            self.final_report,
+            status="completed" if self.status == "completed" else self.status,
+        )
 
     async def approve_hold(self, approved_by: str) -> dict:
         """
@@ -271,6 +489,8 @@ class AutonomousInvestigationAgent:
         # Resume the autonomous loop to complete the investigation
         await self._set_status("executing")
         await self._run_react_loop(max_turns=4)
+        if self.status in ("completed", "awaiting_approval"):
+            await self._finalize_investigation()
 
         return self._build_summary()
 
@@ -319,6 +539,8 @@ class AutonomousInvestigationAgent:
         # Resume autonomous loop so the agent adapts and generates the final assessment
         await self._set_status("executing")
         await self._run_react_loop(max_turns=4)
+        if self.status in ("completed", "awaiting_approval"):
+            await self._finalize_investigation()
 
         return self._build_summary()
 
@@ -457,92 +679,139 @@ class AutonomousInvestigationAgent:
             status="requested",
         )
 
+        # ── 1. ArmorIQ Cryptographic Verification ────────────────────────────
+        # A dedicated IntentMismatch means the action was outside the signed
+        # plan → governance block. Any other exception is an SDK/transport error
+        # and must NEVER be mislabelled as a governance decision.
         try:
-            # ── ArmorIQ Cryptographic Verification ───────────────────────────
-            # Checks Merkle proof of the action against the signed Intent Token
             invoke_res = self._client.invoke(
                 mcp=CYBERDRISHTI_MCP,
                 action=action,
                 intent_token=self.intent_token,
                 params={k: str(v) for k, v in clean_params.items()},
             )
-
-            # ── Authorized Execution ─────────────────────────────────────────
-            obs = await tool_fn(**tool_params)
-
-            # Cache entity/correlation findings for downstream turns
-            if action == "analyze_suspicious_entities" and isinstance(obs, dict):
-                self._discovered_entities = obs
-            elif action == "correlate_events" and isinstance(obs, dict):
-                self._discovered_correlations = obs
-
-            await self._log_action(
-                "ACTION_EXECUTED",
-                f"Action executed (ArmorIQ Authorized ✓): {action}",
-                {
-                    "action": action,
-                    "armoriq_verified": invoke_res.get("success", True),
-                    "observation_summary": _summarize(obs),
-                },
-                status="executed",
+        except self._IntentMismatch as exc:
+            return await self._enter_governance_hold(
+                action, description, clean_params, tool_params, ai_thought, exc
             )
+        except Exception as exc:
+            logger.error(f"[Agent] ArmorIQ verification unavailable for {action}: {exc}")
+            await self._log_action(
+                "GOVERNANCE_UNAVAILABLE",
+                f"ArmorIQ verification could not be completed for action: {action}",
+                {"action": action, "error": str(exc), "outcome": "governance_unavailable"},
+                status="failed",
+            )
+            return False
 
-            # Append to ReAct turn history
+        # ── 2. Authorized Execution ──────────────────────────────────────────
+        # Failures here are tool/runtime errors — never a governance block.
+        try:
+            obs = await tool_fn(**tool_params)
+        except Exception as exc:
+            logger.error(f"[Agent] Tool execution failed for {action}: {exc}")
+            await self._log_action(
+                "ACTION_FAILED",
+                f"Action failed to execute: {action}",
+                {"action": action, "error": str(exc), "outcome": "tool_error"},
+                status="failed",
+            )
             self.history.append({
                 "turn": len(self.history) + 1,
                 "thought": ai_thought,
                 "action": action,
                 "params": clean_params,
-                "observation": obs,
+                "observation": {"status": "tool_error", "error": str(exc)},
             })
             return False
 
-        except self._IntentMismatch as exc:
-            # ── ArmorIQ Cryptographic Interception ───────────────────────────
-            # The action was NOT declared in the signed authorization plan.
-            hold_id = f"hold-{self.session_id[:8]}-{action[:12]}"
+        # Cache entity/correlation findings for downstream turns
+        if action == "analyze_suspicious_entities" and isinstance(obs, dict):
+            self._discovered_entities = obs
+        elif action == "correlate_events" and isinstance(obs, dict):
+            self._discovered_correlations = obs
 
-            self.pending_hold = {
+        await self._log_action(
+            "ACTION_EXECUTED",
+            f"Action executed (ArmorIQ Authorized ✓): {action}",
+            {
+                "action": action,
+                "armoriq_verified": invoke_res.get("success", True),
+                "armoriq_simulated": bool(invoke_res.get("simulated", False)),
+                "observation_summary": _summarize(obs),
+            },
+            status="executed",
+        )
+
+        # Append to ReAct turn history
+        self.history.append({
+            "turn": len(self.history) + 1,
+            "thought": ai_thought,
+            "action": action,
+            "params": clean_params,
+            "observation": obs,
+        })
+        return False
+
+    async def _enter_governance_hold(
+        self,
+        action: str,
+        description: str,
+        clean_params: dict,
+        tool_params: dict,
+        ai_thought: str,
+        exc: Exception,
+    ) -> bool:
+        """
+        Record an out-of-plan action as a governance block awaiting human review.
+        No system modification has been performed at this point.
+        """
+        hold_id = f"hold-{self.session_id[:8]}-{action[:12]}"
+
+        self.pending_hold = {
+            "hold_id": hold_id,
+            "action": action,
+            "mcp": CYBERDRISHTI_MCP,
+            "description": description,
+            "ai_reasoning": ai_thought,
+            "armoriq_reason": str(exc),
+            "governance_outcome": "blocked_by_design",
+            "authorization_boundary": (
+                f"Action '{action}' is outside the agent's cryptographically signed authorization plan. "
+                "Perimeter network control modifications require human supervisor sign-off."
+            ),
+            "risk_level": "HIGH",
+            "affected_resource": {
+                "type": "sandbox_firewall_rule",
+                "id": clean_params.get("rule_id", "fwr-002"),
+                "name": "THREAT_IP_BLOCKLIST",
+                "description": "Perimeter block policy managed by NOC/SOC team",
+            },
+            "tool_params": tool_params,
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "status": "awaiting_approval",
+        }
+
+        await self._log_action(
+            "GOVERNANCE_BLOCK",
+            f"Action outside authorization scope was blocked (no system change made): {action}",
+            {
                 "hold_id": hold_id,
                 "action": action,
-                "mcp": CYBERDRISHTI_MCP,
-                "description": description,
+                "armoriq_enforcement": "IntentMismatchException",
+                "enforcement_reason": str(exc),
                 "ai_reasoning": ai_thought,
-                "armoriq_reason": str(exc),
-                "authorization_boundary": (
-                    f"Action '{action}' is outside the agent's cryptographically signed authorization plan. "
-                    "Perimeter network control modifications require human supervisor sign-off."
-                ),
+                "authorization_boundary": self.pending_hold["authorization_boundary"],
+                "governance_outcome": "blocked_by_design",
+                "system_modified": False,
                 "risk_level": "HIGH",
-                "affected_resource": {
-                    "type": "sandbox_firewall_rule",
-                    "id": clean_params.get("rule_id", "fwr-002"),
-                    "name": "THREAT_IP_BLOCKLIST",
-                    "description": "Perimeter block policy managed by NOC/SOC team",
-                },
-                "tool_params": tool_params,
-                "requested_at": datetime.now(timezone.utc).isoformat(),
-                "status": "awaiting_approval",
-            }
+            },
+            status="blocked",
+        )
 
-            await self._log_action(
-                "ARMORIQ_BLOCK",
-                f"ArmorIQ intercepted action outside authorization plan: {action}",
-                {
-                    "hold_id": hold_id,
-                    "action": action,
-                    "armoriq_enforcement": "IntentMismatchException",
-                    "enforcement_reason": str(exc),
-                    "ai_reasoning": ai_thought,
-                    "authorization_boundary": self.pending_hold["authorization_boundary"],
-                    "risk_level": "HIGH",
-                },
-                status="blocked",
-            )
-
-            await self._set_status("awaiting_approval")
-            await self._persist_hold()
-            return True
+        await self._set_status("awaiting_approval")
+        await self._persist_hold()
+        return True
 
     # ── Dynamic ReAct Planner (AI Decision Engine) ───────────────────────────
 
@@ -582,19 +851,44 @@ class AutonomousInvestigationAgent:
                 "params": {},
             }
 
-        # Step 4: Quarantine threat actor
+        # Step 4: Quarantine threat actor — ONLY with a confirmed, real target.
+        # Never act on a null/None target and never substitute a fabricated id.
         if not has_quarantine:
-            suspect_id = self._discovered_entities.get("primary_suspect_id", "syn-ent-001")
-            suspect_val = self._discovered_entities.get("primary_suspect", "203.0.113.42")
+            target_id = self._confirmed_quarantine_target()
+            if target_id is None:
+                self._quarantine_skipped_reason = "no_confirmed_target"
+                # Skip the consequential action entirely; proceed to assessment.
+                return {
+                    "thought": (
+                        "No confirmed threat-actor target exists for this case. "
+                        "Account quarantine was NOT requested — a null/None target "
+                        "must never be acted upon."
+                    ),
+                    "action": "generate_incident_assessment",
+                    "params": {},
+                }
+            target_value = self._confirmed_quarantine_value()
             return {
-                "thought": f"High centrality threat actor confirmed ({suspect_val}). Applying internal account quarantine.",
+                "thought": f"High centrality threat actor confirmed ({target_value}). Applying internal account quarantine.",
                 "action": "quarantine_account",
-                "params": {"entity_id": suspect_id},
+                "params": {"entity_id": target_id},
             }
 
-        # Step 5: AI determines perimeter defense (Out-of-scope trigger)
+        # Step 5: AI determines perimeter defense (Out-of-scope trigger).
+        # Only proposed when a real target IP was actually observed.
         if not has_firewall:
-            suspect_ip = self._discovered_entities.get("primary_suspect_ip", "203.0.113.42")
+            suspect_ip = self._real_suspect_ip()
+            if suspect_ip is None:
+                self._firewall_skipped_reason = "no_confirmed_target_ip"
+                return {
+                    "thought": (
+                        "No confirmed attacker IP was observed in the evidence. "
+                        "A perimeter block was NOT proposed rather than acting on a "
+                        "fabricated address."
+                    ),
+                    "action": "generate_incident_assessment",
+                    "params": {},
+                }
             ai_reasoning = await self._query_rag_for_remediation(suspect_ip)
             return {
                 "thought": ai_reasoning,
@@ -612,6 +906,33 @@ class AutonomousInvestigationAgent:
             "action": "generate_incident_assessment",
             "params": {},
         }
+
+    # ── Target validation (never act on None / fabricated ids) ───────────────
+
+    def _confirmed_quarantine_target(self) -> str | None:
+        """Return a real, discovered entity id to quarantine — else None."""
+        data = self._discovered_entities or {}
+        eid = data.get("primary_suspect_id")
+        if not isinstance(eid, str) or not eid.strip():
+            return None
+        known_ids = {
+            str(e.get("id"))
+            for e in (data.get("entities") or [])
+            if e.get("id")
+        }
+        # If the discovery returned a concrete entity list, the target must be in it.
+        if known_ids and str(eid) not in known_ids:
+            return None
+        return str(eid)
+
+    def _confirmed_quarantine_value(self) -> str | None:
+        return (self._discovered_entities or {}).get("primary_suspect")
+
+    def _real_suspect_ip(self) -> str | None:
+        ip = (self._discovered_entities or {}).get("primary_suspect_ip")
+        if isinstance(ip, str) and ip.strip():
+            return ip
+        return None
 
     async def _query_rag_for_remediation(self, suspect_ip: str) -> str:
         """Call the RAG copilot to reason about perimeter defense. Abstains honestly when offline."""
@@ -655,43 +976,29 @@ class AutonomousInvestigationAgent:
         await self._write_to_audit_chain(action_type, details, status)
 
     async def _write_to_audit_chain(self, action: str, details: dict, status: str):
-        """Append to CyberDrishti's SHA-256 blockchain-style audit chain."""
+        """Append to CyberDrishti's SHA-256 audit chain.
+
+        Uses the shared ``append_audit`` utility so the ArmorIQ trail is byte-for-
+        byte compatible with every other writer and the verifier. The previous
+        hand-rolled duplicate hashing could diverge from the canonical scheme and
+        break chain verification.
+        """
         try:
-            from sqlalchemy import text
-            from db.models import AuditLog
+            from utils.audit import append_audit
 
-            result = await self.db.execute(
-                text("SELECT entry_hash FROM audit_log ORDER BY id DESC LIMIT 1")
-            )
-            last_row = result.fetchone()
-            prev_hash = last_row[0] if last_row else "0" * 64
-
-            now = datetime.now(timezone.utc)
             final_details = {
                 **details,
                 "session_id": self.session_id,
                 "armoriq_status": status,
             }
-            entry_data = json.dumps({
-                "action": f"ARMORIQ_{action}",
-                "user_id": None,
-                "resource_id": self.case_id,
-                "details": final_details,
-                "timestamp": now.isoformat(),
-            }, sort_keys=True)
-
-            entry_hash = hashlib.sha256((prev_hash + entry_data).encode()).hexdigest()
-
-            audit_entry = AuditLog(
-                prev_hash=prev_hash,
-                entry_hash=entry_hash,
+            await append_audit(
+                self.db,
                 action=f"ARMORIQ_{action}",
                 resource_type="agent_session",
-                resource_id=self.case_id,
-                details_json=final_details,
-                event_timestamp=now,
+                resource_id=str(self.case_id),
+                details=final_details,
+                user_id=None,
             )
-            self.db.add(audit_entry)
             await self.db.flush()
         except Exception as exc:
             logger.warning(f"[Agent] Audit chain write failed: {exc}")
@@ -834,6 +1141,13 @@ class AutonomousInvestigationAgent:
             "history_turns": len(self.history),
             "actions": self.actions,
             "pending_hold": self.pending_hold,
+            "case_snapshot": self.case_snapshot,
+            "investigation_plan": self.investigation_plan,
+            "final_report": self.final_report,
+            "skipped_actions": {
+                "quarantine_account": self._quarantine_skipped_reason,
+                "modify_network_control_config": self._firewall_skipped_reason,
+            },
         }
 
 

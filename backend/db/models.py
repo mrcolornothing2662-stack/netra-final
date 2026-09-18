@@ -11,7 +11,7 @@ from sqlalchemy import (
     Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, JSON, Uuid
 )
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, JSONB as PG_JSONB, UUID as PG_UUID
-from sqlalchemy.orm import DeclarativeBase, relationship
+from sqlalchemy.orm import DeclarativeBase, relationship, backref
 from sqlalchemy.sql import func
 
 # Cross-dialect type wrappers supporting both PostgreSQL and SQLite
@@ -40,6 +40,7 @@ class User(Base):
     unit           = Column(String(128))
     role           = Column(String(32), nullable=False, default="constable")
     is_active      = Column(Boolean, nullable=False, default=True)
+    must_change_password = Column(Boolean, nullable=False, default=False)
     created_at     = Column(DateTime(timezone=True), server_default=func.now())
     updated_at     = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -80,6 +81,10 @@ class Case(Base):
     evidence_events  = relationship("EvidenceEvent", back_populates="case", cascade="all, delete-orphan")
     entities         = relationship("Entity", back_populates="case", cascade="all, delete-orphan")
     correlations     = relationship("Correlation", back_populates="case", cascade="all, delete-orphan")
+    relationships    = relationship("Relationship", back_populates="case", cascade="all, delete-orphan")
+    findings         = relationship("InvestigationFinding", back_populates="case", cascade="all, delete-orphan")
+    analysis_runs    = relationship("AnalysisRun", back_populates="case", cascade="all, delete-orphan")
+    intelligence_state = relationship("CaseIntelligenceState", back_populates="case", uselist=False, cascade="all, delete-orphan")
 
     __table_args__ = (
         CheckConstraint("priority IN ('high','medium','low')", name="ck_cases_priority"),
@@ -109,9 +114,17 @@ class EvidenceFile(Base):
     uploaded_at     = Column(DateTime(timezone=True), server_default=func.now())
     processed_at    = Column(DateTime(timezone=True))
 
+    # Document Version Timeline (F01) lineage fields
+    parent_evidence_id = Column(UUID(as_uuid=True), ForeignKey("evidence_files.id", ondelete="SET NULL"), nullable=True)
+    version_number     = Column(Integer, default=1, nullable=False)
+    version_status     = Column(String(32), default="original", nullable=False)  # "original" | "variant" | "superseded"
+    fingerprint_hash   = Column(String(64))
+    variant_details    = Column(JSONB, default=dict)
+
     case     = relationship("Case", back_populates="evidence_files")
     uploader = relationship("User", back_populates="uploaded_files")
     events   = relationship("EvidenceEvent", back_populates="evidence_file")
+    variants = relationship("EvidenceFile", backref=backref("parent_evidence", remote_side=[id], lazy="selectin"), lazy="selectin")
 
     __table_args__ = (
         UniqueConstraint("case_id", "sha256_hash", name="uq_evidence_case_sha256"),
@@ -208,6 +221,192 @@ class Correlation(Base):
     __table_args__ = (
         UniqueConstraint("case_id", "entity_a_id", "entity_b_id", name="uq_correlations_pair"),
         CheckConstraint("decision IN ('flagged','not_flagged')", name="ck_correlations_decision"),
+    )
+
+
+# ── Relationships (Unified Case Graph Edges) ──────────────────────────────────
+
+class Relationship(Base):
+    """
+    A persisted, semantically typed edge of the unified case graph.
+
+    Unlike a raw co-occurrence projection, every row carries:
+      • a semantic relationship_type (TRANSFERRED_TO, CALLED, MESSAGED, …)
+      • an epistemic_status — OBSERVED (evidence-backed) or INFERRED (cognitive)
+      • evidence_refs / event_refs provenance for forensic traceability
+      • confidence plus engine/component metadata for inferred links
+
+    Observed edges are materialised at ingestion; inferred edges are written by
+    cognitive engines. They share this table so one graph can express both.
+    """
+    __tablename__ = "relationships"
+
+    id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id           = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    source_entity_id  = Column(UUID(as_uuid=True), ForeignKey("entities.id", ondelete="CASCADE"), nullable=False)
+    target_entity_id  = Column(UUID(as_uuid=True), ForeignKey("entities.id", ondelete="CASCADE"), nullable=False)
+    relationship_type = Column(String(32), nullable=False)
+    direction         = Column(String(16), nullable=False, default="OUTBOUND")
+    epistemic_status  = Column(String(16), nullable=False, default="OBSERVED")
+    confidence        = Column(Float, nullable=False, default=1.0)
+    amount            = Column(Float)
+    event_timestamp   = Column(DateTime(timezone=True))
+    first_seen        = Column(DateTime(timezone=True))
+    last_seen         = Column(DateTime(timezone=True))
+    observation_count = Column(Integer, nullable=False, default=1)
+    attributes        = Column(JSONB, default=dict)
+    evidence_refs     = Column(JSONB, default=list)
+    event_refs        = Column(JSONB, default=list)
+    source_engine     = Column(String(64))
+    engine_version    = Column(String(32))
+    component_scores  = Column(JSONB, default=dict)
+    reason_codes      = Column(JSONB, default=list)
+    created_at        = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at        = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    case          = relationship("Case", back_populates="relationships")
+    source_entity = relationship("Entity", foreign_keys=[source_entity_id])
+    target_entity = relationship("Entity", foreign_keys=[target_entity_id])
+
+    __table_args__ = (
+        UniqueConstraint(
+            "case_id", "source_entity_id", "target_entity_id",
+            "relationship_type", "epistemic_status",
+            name="uq_relationships_edge",
+        ),
+        CheckConstraint(
+            "epistemic_status IN ('OBSERVED','INFERRED')",
+            name="ck_relationships_epistemic_status",
+        ),
+        CheckConstraint(
+            "direction IN ('OUTBOUND','INBOUND','BIDIRECTIONAL')",
+            name="ck_relationships_direction",
+        ),
+        Index("idx_relationships_case_id", "case_id"),
+        Index("idx_relationships_epistemic_status", "epistemic_status"),
+        Index("idx_relationships_source", "source_entity_id"),
+        Index("idx_relationships_target", "target_entity_id"),
+    )
+
+
+# ── Investigation Findings (unified intelligence output) ──────────────────────
+
+class InvestigationFinding(Base):
+    """
+    One traceable intelligence finding, whatever engine produced it.
+
+    Findings are the contract between the cognitive layer and every consumer
+    (Cognitive tab, graph overlays, copilot, reports). `fingerprint` is a stable
+    identity so re-running analysis updates the same finding instead of
+    duplicating it.
+    """
+    __tablename__ = "findings"
+
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id          = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    fingerprint      = Column(String(64), nullable=False)
+    finding_type     = Column(String(48), nullable=False)
+    title            = Column(String(512), nullable=False)
+    description      = Column(Text)
+    confidence       = Column(Float)
+    severity         = Column(String(16), nullable=False, default="MEDIUM")
+    status           = Column(String(24), nullable=False, default="OPEN")
+    source_engine    = Column(String(64))
+    engine_version   = Column(String(32))
+    entity_refs      = Column(JSONB, default=list)
+    event_refs       = Column(JSONB, default=list)
+    evidence_refs    = Column(JSONB, default=list)
+    component_scores = Column(JSONB, default=dict)
+    reason_codes     = Column(JSONB, default=list)
+    reasoning        = Column(Text)
+    citations        = Column(JSONB, default=list)
+    observed_at      = Column(DateTime(timezone=True))
+    created_at       = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at       = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    case = relationship("Case", back_populates="findings")
+
+    __table_args__ = (
+        UniqueConstraint("case_id", "fingerprint", name="uq_findings_case_fingerprint"),
+        CheckConstraint(
+            "severity IN ('LOW','MEDIUM','HIGH','CRITICAL')",
+            name="ck_findings_severity",
+        ),
+        CheckConstraint(
+            "status IN ('OPEN','CONFIRMED','DISMISSED','SUPERSEDED')",
+            name="ck_findings_status",
+        ),
+        Index("idx_findings_case_id", "case_id"),
+        Index("idx_findings_type", "finding_type"),
+        Index("idx_findings_severity", "severity"),
+        Index("idx_findings_status", "status"),
+    )
+
+
+# ── Analysis Runs (orchestrator execution log) ────────────────────────────────
+
+class AnalysisRun(Base):
+    """One execution of the cognitive orchestrator over a case's case state."""
+    __tablename__ = "analysis_runs"
+
+    id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id           = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    trigger           = Column(String(32), nullable=False, default="manual")
+    status            = Column(String(16), nullable=False, default="running")
+    engines_requested = Column(JSONB, default=list)
+    engines_run       = Column(JSONB, default=list)
+    engines_skipped   = Column(JSONB, default=list)
+    findings_created  = Column(Integer, nullable=False, default=0)
+    findings_updated  = Column(Integer, nullable=False, default=0)
+    started_at        = Column(DateTime(timezone=True), server_default=func.now())
+    completed_at      = Column(DateTime(timezone=True))
+    duration_ms       = Column(Integer)
+    error             = Column(Text)
+    summary           = Column(JSONB, default=dict)
+
+    case = relationship("Case", back_populates="analysis_runs")
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running','completed','failed')",
+            name="ck_analysis_runs_status",
+        ),
+        Index("idx_analysis_runs_case_id", "case_id"),
+        Index("idx_analysis_runs_status", "status"),
+    )
+
+
+# ── Case Intelligence State (latest per-case intelligence snapshot) ───────────
+
+class CaseIntelligenceState(Base):
+    """
+    Materialised snapshot of what NETRA currently knows about a case. It powers
+    the Cognitive tab header ("47 Evidence · 83 Entities · 12 Findings …") and
+    lets the UI render intelligence without recomputing every engine.
+    """
+    __tablename__ = "case_intelligence_state"
+
+    id                           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id                      = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    evidence_count               = Column(Integer, nullable=False, default=0)
+    processed_evidence_count     = Column(Integer, nullable=False, default=0)
+    entity_count                 = Column(Integer, nullable=False, default=0)
+    event_count                  = Column(Integer, nullable=False, default=0)
+    relationship_count           = Column(Integer, nullable=False, default=0)
+    observed_relationship_count  = Column(Integer, nullable=False, default=0)
+    inferred_relationship_count  = Column(Integer, nullable=False, default=0)
+    finding_count                = Column(Integer, nullable=False, default=0)
+    high_priority_count          = Column(Integer, nullable=False, default=0)
+    findings_by_type             = Column(JSONB, default=dict)
+    engine_status                = Column(JSONB, default=dict)
+    last_run_id                  = Column(UUID(as_uuid=True), ForeignKey("analysis_runs.id", ondelete="SET NULL"))
+    last_run_at                  = Column(DateTime(timezone=True))
+    updated_at                   = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    case = relationship("Case", back_populates="intelligence_state")
+
+    __table_args__ = (
+        UniqueConstraint("case_id", name="uq_case_intelligence_state_case"),
     )
 
 

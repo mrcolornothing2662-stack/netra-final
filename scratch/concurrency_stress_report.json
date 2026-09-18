@@ -1,0 +1,64 @@
+{
+  "tier_1_baseline": {
+    "requests": 25,
+    "total_seconds": 0.524,
+    "rps": 47.73,
+    "mean_ms": 20.95,
+    "p50_ms": 16.74,
+    "p95_ms": 43.43,
+    "p99_ms": 45.5,
+    "endpoint_p50s": {
+      "GET /api/v1/cases/{id}": 3.3,
+      "GET /api/v1/timeline/{id}": 15.16,
+      "GET /api/v1/graph/{id}": 30.95,
+      "GET /api/v1/cognitive/cases/{id}/confidence-meter": 34.03,
+      "GET /api/v1/cognitive/cases/{id}/defence-bot": 15.57
+    }
+  },
+  "tier_2_concurrency": {
+    "concurrent_cases": 5,
+    "total_operations": 20,
+    "duration_seconds": 0.272,
+    "rps": 73.54,
+    "p50_ms": 42.76,
+    "p95_ms": 154.14,
+    "p99_ms": 158.44,
+    "isolation_verified": true
+  },
+  "tier_3_read_write": {
+    "concurrent_cases": 10,
+    "total_operations": 40,
+    "duration_seconds": 0.675,
+    "rps": 59.3,
+    "write_p50_ms": 134.7,
+    "write_p95_ms": 462.77,
+    "overall_p50_ms": 106.29,
+    "overall_p95_ms": 307.99,
+    "deadlocks": 0
+  },
+  "tier_4_sustained_traffic": {
+    "concurrent_workers": 25,
+    "total_requests": 250,
+    "successful_requests": 250,
+    "failed_requests": 0,
+    "duration_seconds": 3.061,
+    "rps": 81.68,
+    "error_rate_pct": 0.0,
+    "p50_ms": 263.68,
+    "p95_ms": 510.67,
+    "p99_ms": 561.5
+  },
+  "tier_5_database_index_stress": {
+    "active_cases": 50,
+    "cross_case_collision_ms": 61.48,
+    "cross_case_collisions_found": 50,
+    "syndicates_clustered": 8,
+    "cross_match_sql_ms": 445.04,
+    "pagination_50_cases_ms": 8.52,
+    "deep_relational_join_ms": 41.64,
+    "index_scan_verified": true
+  },
+  "total_matrix_duration_seconds": 6.03,
+  "checkpoints_passed": 32,
+  "total_checkpoints": 32
+}

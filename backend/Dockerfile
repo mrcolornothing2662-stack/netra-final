@@ -23,6 +23,8 @@ COPY . .
 # Create directories expected by the app
 RUN mkdir -p uploads reports artifacts/chroma_db training_data synthetic_dataset models
 
+RUN chmod +x start.sh
+
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["./start.sh"]

@@ -63,22 +63,40 @@ def normalise_phone(raw: str) -> str:
 
 # ── Regex Patterns ─────────────────────────────────────────────────────────────
 
-# Phone: allows internal spaces or hyphens between 5-digit halves, or standard 10-digit
+# Phone: allows internal spaces or hyphens, masked synthetic format (+91-98XXXX1201), or standard 10-digit
 PHONE_RE = re.compile(
-    r'(?:\+91[\s\-]?)?[6-9]\d{4}[\s\-]?\d{5}\b|(?:\+91[\s\-]?)?[6-9]\d{2}[\s\-]?\d{3}[\s\-]?\d{4}\b|(?:\+91\s?)?[6-9]\d{9}\b'
+    r'(?:\+91[\s\-]?)?[6-9]\d(?:X{4}|\d{4})[\s\-]?\d{4}\b|'
+    r'(?:\+91[\s\-]?)?[6-9]\d{4}[\s\-]?\d{5}\b|'
+    r'(?:\+91[\s\-]?)?[6-9]\d{2}[\s\-]?\d{3}[\s\-]?\d{4}\b|'
+    r'(?:\+91\s?)?[6-9]\d{9}\b',
+    re.IGNORECASE,
 )
+
+# Structured phone identifiers (e.g. PH-002, PH-003, PHONE-01)
+STRUCTURED_PHONE_RE = re.compile(r'(?<![\w\-])(?:PH|PHONE)-[A-Z0-9_\-]{2,32}\b', re.IGNORECASE)
+
+# Cell-site / Tower identifiers (e.g. CHD-CELL-17, MOH-CELL-04)
+CELL_TOWER_RE = re.compile(r'(?<![\w\-])[A-Z]{2,6}-CELL-\d{1,4}\b', re.IGNORECASE)
+
+# Device identifiers (e.g. DEV-002, DEVICE-01)
+DEVICE_RE = re.compile(r'(?<![\w\-])(?:DEV|DEVICE)-[A-Z0-9_\-]{2,32}\b', re.IGNORECASE)
+
+# Chat / Conversation identifiers (e.g. CHAT-001, CONV-01)
+CHAT_RE = re.compile(r'(?<![\w\-])(?:CHAT|CONV)-[A-Z0-9_\-]{2,32}\b', re.IGNORECASE)
+
+# Transaction reference identifiers (e.g. TXN-005, TX-01)
+TXN_RE = re.compile(r'(?<![\w\-])(?:UPI-TXN|TXN|TX)-[A-Z0-9_\-]{2,32}\b', re.IGNORECASE)
 
 # UPI Virtual Payment Address (e.g. name@okhdfc, 9876543210@paytm)
 UPI_RE = re.compile(r'\b[\w.\-]{2,256}@[a-zA-Z]{2,64}\b')
 
-# Account numbers: 9-18 continuous digits
-ACCOUNT_RE = re.compile(r'\b\d{9,18}\b|\b[0-9Ool]{11,18}\b')
+# Account numbers: 9-18 continuous digits or structured account codes (e.g. ACCT-MULE-11, ACC-001)
+ACCOUNT_RE = re.compile(r'\b\d{9,18}\b|\b[0-9Ool]{11,18}\b|(?<![\w\-])(?:ACCT|ACC)-[A-Z0-9_\-]{3,32}\b', re.IGNORECASE)
 
 # Amounts: standard currency symbols, numbers, and colloquial multipliers
 AMOUNT_RE = re.compile(
     r'(?:₹|Rs\.?|INR)\s?([0-9Ool]{1,3}(?:,[0-9Ool]{2,3})*(?:\.\d{1,2})?)\s?(k|K|hazar|lakh|L|peti|crore|Cr|khokha)?\b'
-    r'|\b([1-9][0-9Ool]{1,3})\s?(k|K|hazar|lakh|L|peti|crore|Cr|khokha)\b'
-    r'|\b([1-9]\d{3,8}(?:\.\d{1,2})?)\b',
+    r'|\b([1-9][0-9Ool]{1,3})\s?(k|K|hazar|lakh|L|peti|crore|Cr|khokha)\b',
     re.IGNORECASE,
 )
 
@@ -171,10 +189,33 @@ class RegexExtractor:
                 continue
             _add("UPI", raw, raw.lower().strip(), m.start(), m.end())
 
-        # 4. PHONE (matches standard + spaced/hyphenated)
+        # 4. PHONE (matches standard + spaced/hyphenated + structured PH-xxx)
         for m in PHONE_RE.finditer(text):
             raw = m.group()
             _add("PHONE", raw, normalise_phone(raw), m.start(), m.end())
+        for m in STRUCTURED_PHONE_RE.finditer(text):
+            raw = m.group()
+            _add("PHONE", raw, raw.upper().strip(), m.start(), m.end())
+
+        # 4b. DEVICE
+        for m in DEVICE_RE.finditer(text):
+            raw = m.group()
+            _add("DEVICE", raw, raw.upper().strip(), m.start(), m.end())
+
+        # 4c. CHAT
+        for m in CHAT_RE.finditer(text):
+            raw = m.group()
+            _add("CHAT", raw, raw.upper().strip(), m.start(), m.end())
+
+        # 4d. TRANSACTION
+        for m in TXN_RE.finditer(text):
+            raw = m.group()
+            _add("TRANSACTION", raw, raw.upper().strip(), m.start(), m.end())
+
+        # 4e. CELL_TOWER
+        for m in CELL_TOWER_RE.finditer(text):
+            raw = m.group()
+            _add("CELL_TOWER", raw, raw.upper().strip(), m.start(), m.end())
 
         # 5. IFSC (normalizes OCR O -> 0)
         for m in IFSC_RE.finditer(text):
@@ -190,6 +231,10 @@ class RegexExtractor:
         # 7. ACCOUNT (after PHONE and IFSC to avoid overlap)
         for m in ACCOUNT_RE.finditer(text):
             raw = m.group()
+            raw_upper = raw.upper()
+            if raw_upper.startswith("ACCT-") or raw_upper.startswith("ACC-"):
+                _add("ACCOUNT", raw, raw_upper.strip(), m.start(), m.end())
+                continue
             norm_acc = raw.replace("O", "0").replace("o", "0").replace("l", "1")
             if not norm_acc.isdigit():
                 continue
@@ -201,12 +246,14 @@ class RegexExtractor:
         # 8. AMOUNT
         for m in AMOUNT_RE.finditer(text):
             raw_match = m.group()
-            numeric = m.group(1) or m.group(3) or m.group(5)
+            numeric = m.group(1) or m.group(3)
             suffix = m.group(2) or m.group(4)
             if not numeric:
                 continue
             norm = normalise_amount(numeric, suffix)
-            _add("AMOUNT", raw_match.strip(), norm if norm is not None else numeric, m.start(), m.end())
+            if norm is None:
+                continue
+            _add("AMOUNT", raw_match.strip(), norm, m.start(), m.end())
 
         # 9. OTP
         for m in OTP_RE.finditer(text):

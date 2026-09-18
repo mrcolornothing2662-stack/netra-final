@@ -126,6 +126,44 @@ def test_simulate_freeze_completed_transfers_is_int_contract():
     assert result["preserved_total"] == 90000.0, result["preserved_total"]
 
 
+# ── (h) Timezone-invariant freeze: naive IST == aware IST (+05:30) ────────────
+
+def test_freeze_identical_naive_vs_aware_ist():
+    """§1.1 regression: the same Shadow Mule scenario must produce identical
+    preserved capital whether event timestamps are naive IST (SQLite path)
+    or explicit +05:30 offset-aware (PostgreSQL ``timestamptz`` path).
+
+    Root cause of the original 18/19 on PG: _ts() treated naive timestamps
+    as UTC, so when PG returned +05:30 events and the freeze_time was naive,
+    the freeze landed 5.5h "after" all transfers → preserved ₹0."""
+    transfers_naive = [
+        {"from": "VICTIM", "to": "MULE", "amount": 285000, "timestamp": "2026-08-18T09:50:03"},
+        {"from": "MULE",   "to": "X",    "amount": 180000, "timestamp": "2026-08-18T09:50:41"},
+        {"from": "MULE",   "to": "Y",    "amount": 95000,  "timestamp": "2026-08-18T09:51:02"},
+    ]
+    transfers_aware = [
+        {"from": "VICTIM", "to": "MULE", "amount": 285000, "timestamp": "2026-08-18T09:50:03+05:30"},
+        {"from": "MULE",   "to": "X",    "amount": 180000, "timestamp": "2026-08-18T09:50:41+05:30"},
+        {"from": "MULE",   "to": "Y",    "amount": 95000,  "timestamp": "2026-08-18T09:51:02+05:30"},
+    ]
+    freeze_time_naive = "2026-08-18T09:50:30"
+    freeze_time_aware = "2026-08-18T09:50:30+05:30"
+
+    r_naive = simulate_freeze(transfers_naive, "MULE", freeze_time_naive)
+    r_aware = simulate_freeze(transfers_aware, "MULE", freeze_time_aware)
+    r_mixed = simulate_freeze(transfers_aware, "MULE", freeze_time_naive)
+
+    # All three must produce the identical preserved_total: VICTIM→MULE (₹285k)
+    # arrives pre-freeze; the two MULE→X/Y debits (₹275k) are blocked post-freeze.
+    for label, result in [("naive", r_naive), ("aware", r_aware), ("mixed", r_mixed)]:
+        assert result["preserved_total"] == 275000.0, \
+            f"{label} preserved {result['preserved_total']}, expected 275000"
+        assert result["completed_transfers"] == 1, \
+            f"{label} completed {result['completed_transfers']}, expected 1"
+        assert len(result["blocked_out_events"]) == 2, \
+            f"{label} blocked {len(result['blocked_out_events'])}, expected 2"
+
+
 # ── Dual-mode runner ──────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

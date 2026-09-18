@@ -1,26 +1,351 @@
 {
   "_meta": {
-    "purpose": "Canonical statutory lookup for the deterministic output verifier. Seed entries verified against primary sources on 2026-09-06 (see source fields). Production build: regenerate from official MHA gazette PDFs and have the result reviewed by a qualified legal reviewer before operational use.",
+    "purpose": "Canonical statutory lookup for the deterministic Legal Compliance Shield. Seed entries verified against primary sources and official gazettes on 2026-09-17. Reflects BNS, BNSS, BSA, IT Act, DPDP Act, and PMLA.",
     "transition_date": "2024-07-01",
     "transition_note": "BNS/BNSS/BSA replaced IPC/CrPC/Indian Evidence Act with effect from 1 July 2024."
   },
   "acts": {
-    "BNS": {"name": "Bharatiya Nyaya Sanhita, 2023", "replaces": "IPC"},
-    "BNSS": {"name": "Bharatiya Nagarik Suraksha Sanhita, 2023", "replaces": "CrPC"},
-    "BSA": {"name": "Bharatiya Sakshya Adhiniyam, 2023", "replaces": "IEA"},
-    "IT Act": {"name": "Information Technology Act, 2000", "replaces": null}
+    "BNS": {
+      "name": "Bharatiya Nyaya Sanhita, 2023",
+      "replaces": "IPC",
+      "full_title": "The Bharatiya Nyaya Sanhita, 2023 (Act No. 45 of 2023)"
+    },
+    "BNSS": {
+      "name": "Bharatiya Nagarik Suraksha Sanhita, 2023",
+      "replaces": "CrPC",
+      "full_title": "The Bharatiya Nagarik Suraksha Sanhita, 2023 (Act No. 46 of 2023)"
+    },
+    "BSA": {
+      "name": "Bharatiya Sakshya Adhiniyam, 2023",
+      "replaces": "IEA",
+      "full_title": "The Bharatiya Sakshya Adhiniyam, 2023 (Act No. 47 of 2023)"
+    },
+    "IT Act": {
+      "name": "Information Technology Act, 2000",
+      "replaces": null,
+      "full_title": "The Information Technology Act, 2000 (Act No. 21 of 2000)"
+    },
+    "DPDP Act": {
+      "name": "Digital Personal Data Protection Act, 2023",
+      "replaces": null,
+      "full_title": "The Digital Personal Data Protection Act, 2023 (Act No. 22 of 2023)"
+    },
+    "PMLA": {
+      "name": "Prevention of Money Laundering Act, 2002",
+      "replaces": null,
+      "full_title": "The Prevention of Money Laundering Act, 2002 (Act No. 15 of 2003)"
+    }
   },
   "sections": [
-    {"act": "BNS", "section": "318", "title": "Cheating", "status": "in_force", "source": "MHA official BNS text; BNS 318(4) = old IPC 420 (cheating and dishonestly inducing delivery of property)", "replaces": "IPC 420"},
-    {"act": "BNS", "section": "316", "title": "Criminal breach of trust", "status": "in_force", "source": "MHA official BNS text", "replaces": "IPC 406"},
-    {"act": "BNS", "section": "319", "title": "Cheating by personation", "status": "in_force", "source": "MHA official BNS text", "replaces": "IPC 419"},
-    {"act": "BNS", "section": "308", "title": "Extortion", "status": "in_force", "source": "MHA official BNS text", "replaces": "IPC 383-384"},
-    {"act": "BNSS", "section": "106", "title": "Seizure of property (incl. bank account freeze during investigation)", "status": "in_force", "source": "MHA BNSS text; LiveLaw analysis; Blue Sea Ventures v. State of AP (AP HC, 2025) notes evidentiary scope", "replaces": "CrPC 102"},
-    {"act": "BNSS", "section": "107", "title": "Attachment, forfeiture or restoration of property", "status": "in_force", "source": "MHA BNSS text", "replaces": "CrPC 102 provisos / 451-452 scheme"},
-    {"act": "BNSS", "section": "94", "title": "Summons to produce document or other thing (expressly covers electronic records)", "status": "in_force", "source": "MHA BNSS text; Indian Kanoon full text", "replaces": "CrPC 91"},
-    {"act": "BSA", "section": "63", "title": "Admissibility of electronic records; certificate under 63(4)(c)", "status": "in_force", "source": "MHA official BSA gazette PDF; Indian Kanoon", "replaces": "IEA 65B"},
-    {"act": "IT Act", "section": "66C", "title": "Identity theft", "status": "in_force", "source": "IT Act 2000 as amended"},
-    {"act": "IT Act", "section": "66D", "title": "Cheating by personation using computer resource", "status": "in_force", "source": "IT Act 2000 as amended"},
-    {"act": "IT Act", "section": "66A", "title": "Punishment for sending offensive messages through communication service", "status": "struck_down", "source": "Shreya Singhal v. Union of India, (2015) 5 SCC 1 — struck down in entirety, 24 March 2015", "replaces": null}
+    {
+      "act": "BNS",
+      "section": "318",
+      "subsections": ["(1)", "(2)", "(3)", "(4)"],
+      "title": "Cheating",
+      "status": "in_force",
+      "source": "MHA official BNS text; BNS 318(4) = old IPC 420 (cheating and dishonestly inducing delivery of property); BNS 318(2) = old IPC 417",
+      "replaces": "IPC 420",
+      "mandatory_notes": "Primary penal charging section for cyber fraud and dishonest inducement of funds."
+    },
+    {
+      "act": "BNS",
+      "section": "319",
+      "subsections": ["(1)", "(2)"],
+      "title": "Cheating by personation",
+      "status": "in_force",
+      "source": "MHA official BNS text; BNS 319 = old IPC 419",
+      "replaces": "IPC 419",
+      "mandatory_notes": "Applies to impersonation of law enforcement, bank officials, or government authorities in digital arrest/phishing."
+    },
+    {
+      "act": "BNS",
+      "section": "316",
+      "subsections": ["(1)", "(2)", "(3)", "(4)", "(5)"],
+      "title": "Criminal breach of trust",
+      "status": "in_force",
+      "source": "MHA official BNS text; BNS 316 = old IPC 406/409",
+      "replaces": "IPC 406",
+      "mandatory_notes": "Applies where digital funds or assets were lawfully entrusted and dishonestly converted/misappropriated."
+    },
+    {
+      "act": "BNS",
+      "section": "308",
+      "subsections": ["(1)", "(2)", "(3)", "(4)", "(5)", "(6)", "(7)"],
+      "title": "Extortion",
+      "status": "in_force",
+      "source": "MHA official BNS text; BNS 308 = old IPC 383-389",
+      "replaces": "IPC 384",
+      "mandatory_notes": "Applicable in coercive cyber extortion, digital arrest threats, and sextortion schemes."
+    },
+    {
+      "act": "BNS",
+      "section": "336",
+      "subsections": ["(1)", "(2)", "(3)", "(4)"],
+      "title": "Forgery",
+      "status": "in_force",
+      "source": "MHA official BNS text; BNS 336(3) = old IPC 468 (forgery for purpose of cheating)",
+      "replaces": "IPC 468",
+      "mandatory_notes": "Covers creation of forged digital documents, notices, warrants, or payment receipts."
+    },
+    {
+      "act": "BNS",
+      "section": "338",
+      "subsections": [],
+      "title": "Forgery of valuable security, will, etc.",
+      "status": "in_force",
+      "source": "MHA official BNS text; BNS 338 = old IPC 467",
+      "replaces": "IPC 467",
+      "mandatory_notes": "Covers forgery of banking authorizations, bills of exchange, and valuable securities."
+    },
+    {
+      "act": "BNS",
+      "section": "340",
+      "subsections": ["(1)", "(2)"],
+      "title": "Forged document or electronic record / Using as genuine",
+      "status": "in_force",
+      "source": "MHA official BNS text; BNS 340(2) = old IPC 471 (using as genuine a forged document or electronic record)",
+      "replaces": "IPC 471",
+      "mandatory_notes": "Applies when suspect fraudulently passes off altered or fake electronic records."
+    },
+    {
+      "act": "BNS",
+      "section": "61",
+      "subsections": ["(1)", "(2)"],
+      "title": "Criminal conspiracy",
+      "status": "in_force",
+      "source": "MHA official BNS text; BNS 61(1) defines conspiracy, BNS 61(2) = old IPC 120B punishment",
+      "replaces": "IPC 120B",
+      "mandatory_notes": "Invoked in multi-tiered cyber fraud operations involving mule networks and recruiters."
+    },
+    {
+      "act": "BNS",
+      "section": "111",
+      "subsections": ["(1)", "(2)", "(3)", "(4)", "(5)", "(6)", "(7)"],
+      "title": "Organized crime",
+      "status": "in_force",
+      "source": "MHA official BNS text; new comprehensive provision",
+      "replaces": null,
+      "mandatory_notes": "Applies to continuing unlawful cyber-syndicates committing financial crimes."
+    },
+    {
+      "act": "BNSS",
+      "section": "106",
+      "subsections": ["(1)", "(2)", "(3)"],
+      "title": "Seizure of property (including bank account freeze)",
+      "status": "in_force",
+      "source": "MHA official BNSS text; Blue Sea Ventures v. State of AP (AP HC, 2025)",
+      "replaces": "CrPC 102",
+      "mandatory_notes": "MANDATORY JUDICIAL SAFEGUARD: Immediate reporting to the jurisdictional Magistrate is required. Freezing without magistrate intimation is legally invalid."
+    },
+    {
+      "act": "BNSS",
+      "section": "107",
+      "subsections": [],
+      "title": "Attachment, forfeiture or restoration of property",
+      "status": "in_force",
+      "source": "MHA official BNSS text",
+      "replaces": "CrPC 105C",
+      "mandatory_notes": "Requires application to Court for attachment of proceeds of crime."
+    },
+    {
+      "act": "BNSS",
+      "section": "94",
+      "subsections": ["(1)", "(2)", "(3)"],
+      "title": "Summons to produce document or other thing (electronic records)",
+      "status": "in_force",
+      "source": "MHA official BNSS text",
+      "replaces": "CrPC 91",
+      "mandatory_notes": "Expressly authorizes requisitioning electronic communications and digital records from service providers."
+    },
+    {
+      "act": "BNSS",
+      "section": "173",
+      "subsections": ["(1)", "(2)", "(3)", "(4)"],
+      "title": "Information in cognizable cases (FIR, Zero FIR & e-FIR)",
+      "status": "in_force",
+      "source": "MHA official BNSS text",
+      "replaces": "CrPC 154",
+      "mandatory_notes": "Mandates receipt of electronic information (e-FIR) and Zero FIR without jurisdictional denial."
+    },
+    {
+      "act": "BNSS",
+      "section": "175",
+      "subsections": ["(1)", "(2)", "(3)", "(4)"],
+      "title": "Police officer's power to investigate cognizable case",
+      "status": "in_force",
+      "source": "MHA official BNSS text",
+      "replaces": "CrPC 156",
+      "mandatory_notes": "Section 175(3) requires prior complaint recourse and affidavit for judicial investigation orders."
+    },
+    {
+      "act": "BNSS",
+      "section": "187",
+      "subsections": ["(1)", "(2)", "(3)", "(4)", "(5)"],
+      "title": "Procedure when investigation cannot be completed in 24 hours (Custody & Remand)",
+      "status": "in_force",
+      "source": "MHA official BNSS text; State of AP v. Suda Suresh (SC, 2026)",
+      "replaces": "CrPC 167",
+      "mandatory_notes": "15 days maximum police custody may be availed in whole or in parts across the initial 40 or 60 day detention window."
+    },
+    {
+      "act": "BSA",
+      "section": "61",
+      "subsections": [],
+      "title": "Admissibility of electronic or digital records",
+      "status": "in_force",
+      "source": "MHA official BSA text",
+      "replaces": "IEA 65A",
+      "mandatory_notes": "Electronic records have the same legal status and enforceability as traditional paper documents."
+    },
+    {
+      "act": "BSA",
+      "section": "62",
+      "subsections": [],
+      "title": "Proof of electronic records",
+      "status": "in_force",
+      "source": "MHA official BSA text",
+      "replaces": "IEA 65B",
+      "mandatory_notes": "Outlines procedural requirements for electronic evidence production in judicial proceedings."
+    },
+    {
+      "act": "BSA",
+      "section": "63",
+      "subsections": ["(1)", "(2)", "(3)", "(4)", "(5)"],
+      "title": "Conditions for admissibility of electronic records & Certificate",
+      "status": "in_force",
+      "source": "MHA official BSA gazette text; Indian Kanoon",
+      "replaces": "IEA 65B",
+      "mandatory_notes": "MANDATORY CERTIFICATE REQUIREMENTS: To admit secondary electronic evidence, certificate under 63(4) requires dual signatures (device operator + expert/custodian) and SHA-256 hash value."
+    },
+    {
+      "act": "IT Act",
+      "section": "66D",
+      "subsections": [],
+      "title": "Cheating by personation using computer resource",
+      "status": "in_force",
+      "source": "Information Technology Act, 2000 as amended",
+      "replaces": null,
+      "mandatory_notes": "Core cyber offence: punishes cheating by personation by means of any computer resource or communication device."
+    },
+    {
+      "act": "IT Act",
+      "section": "66C",
+      "subsections": [],
+      "title": "Identity theft",
+      "status": "in_force",
+      "source": "Information Technology Act, 2000 as amended",
+      "replaces": null,
+      "mandatory_notes": "Fraudulent or dishonest use of electronic signature, password, UPI credentials, or unique identification feature."
+    },
+    {
+      "act": "IT Act",
+      "section": "66",
+      "subsections": [],
+      "title": "Computer related offences",
+      "status": "in_force",
+      "source": "Information Technology Act, 2000 as amended",
+      "replaces": null,
+      "mandatory_notes": "Dishonestly or fraudulently committing any act referred to in Section 43 (unauthorized access, download, malware)."
+    },
+    {
+      "act": "IT Act",
+      "section": "66E",
+      "subsections": [],
+      "title": "Violation of privacy",
+      "status": "in_force",
+      "source": "Information Technology Act, 2000 as amended",
+      "replaces": null,
+      "mandatory_notes": "Capturing, publishing, or transmitting images of private area without consent."
+    },
+    {
+      "act": "IT Act",
+      "section": "66F",
+      "subsections": ["(1)", "(2)"],
+      "title": "Cyber terrorism",
+      "status": "in_force",
+      "source": "Information Technology Act, 2000 as amended",
+      "replaces": null,
+      "mandatory_notes": "Threatening unity, integrity, or security of India by denying or damaging critical information infrastructure."
+    },
+    {
+      "act": "IT Act",
+      "section": "69",
+      "subsections": ["(1)", "(2)", "(3)", "(4)"],
+      "title": "Directions for interception, monitoring or decryption of information",
+      "status": "in_force",
+      "source": "Information Technology Act, 2000 as amended",
+      "replaces": null,
+      "mandatory_notes": "Requires statutory order from authorized competent authority (Home Secretary); unauthorized interception is illegal."
+    },
+    {
+      "act": "IT Act",
+      "section": "69A",
+      "subsections": ["(1)", "(2)", "(3)"],
+      "title": "Power to issue directions for blocking public access to computer resource",
+      "status": "in_force",
+      "source": "Information Technology Act, 2000 as amended",
+      "replaces": null,
+      "mandatory_notes": "Used for blocking fraudulent URLs, fake phishing portals, and illegal APK hosting sites."
+    },
+    {
+      "act": "IT Act",
+      "section": "70B",
+      "subsections": ["(1)", "(2)", "(3)", "(4)", "(5)", "(6)", "(7)"],
+      "title": "Indian Computer Emergency Response Team (CERT-In)",
+      "status": "in_force",
+      "source": "Information Technology Act, 2000 as amended",
+      "replaces": null,
+      "mandatory_notes": "Mandatory cybersecurity incident reporting to CERT-In within 6 hours of noticing incident."
+    },
+    {
+      "act": "IT Act",
+      "section": "66A",
+      "subsections": [],
+      "title": "Punishment for sending offensive messages through communication service",
+      "status": "struck_down",
+      "source": "Shreya Singhal v. Union of India, (2015) 5 SCC 1 — struck down in entirety, 24 March 2015",
+      "replaces": null,
+      "mandatory_notes": "STRUCK DOWN: Unconstitutional under Article 19(1)(a). Invocation is legally prohibited and triggers an immediate GOVERNANCE BLOCK."
+    },
+    {
+      "act": "DPDP Act",
+      "section": "4",
+      "subsections": ["(1)", "(2)"],
+      "title": "Grounds for processing digital personal data",
+      "status": "in_force",
+      "source": "Digital Personal Data Protection Act, 2023",
+      "replaces": null,
+      "mandatory_notes": "Processing of personal data must be for lawful purpose with consent or legitimate use."
+    },
+    {
+      "act": "DPDP Act",
+      "section": "8",
+      "subsections": ["(1)", "(2)", "(3)", "(4)", "(5)"],
+      "title": "General obligations of Data Fiduciary (security safeguards)",
+      "status": "in_force",
+      "source": "Digital Personal Data Protection Act, 2023",
+      "replaces": null,
+      "mandatory_notes": "Mandatory technical and organizational measures to prevent personal data breaches in investigation."
+    },
+    {
+      "act": "PMLA",
+      "section": "3",
+      "subsections": [],
+      "title": "Offence of money-laundering",
+      "status": "in_force",
+      "source": "Prevention of Money Laundering Act, 2002 as amended",
+      "replaces": null,
+      "mandatory_notes": "Direct or indirect involvement in any process connected with proceeds of crime."
+    },
+    {
+      "act": "PMLA",
+      "section": "4",
+      "subsections": [],
+      "title": "Punishment for money-laundering",
+      "status": "in_force",
+      "source": "Prevention of Money Laundering Act, 2002 as amended",
+      "replaces": null,
+      "mandatory_notes": "Prescribes rigorous imprisonment (3 to 7 years) and fine."
+    }
   ]
 }

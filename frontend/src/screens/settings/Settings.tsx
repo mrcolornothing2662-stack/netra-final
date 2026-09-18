@@ -4,6 +4,7 @@ import { systemApi, officersApi, type SystemHealth, type AuditVerification, type
 import { getStoredUser, logout } from "../../api/client";
 import { Button } from "../../components/primitives/Button";
 import { Icon } from "../../components/icons";
+import { AuditLogPanel } from "./AuditLogPanel";
 import prim from "../../components/primitives/primitives.module.css";
 import s from "./settings.module.css";
 
@@ -451,6 +452,12 @@ export function Settings() {
                   <Button variant="secondary" onClick={handleSignOut}>
                     Sign Out
                   </Button>
+                </div>
+
+                {/* Full Audit Log Browser */}
+                <div style={{ marginTop: "var(--space-6)" }}>
+                  <div className="t-label" style={{ marginBottom: "var(--space-3)" }}>Audit Log Browser</div>
+                  <AuditLogPanel />
                 </div>
               </div>
             </div>

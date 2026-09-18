@@ -32,7 +32,11 @@ function parseDateTime(timestamp?: string | null): { date: string; ts: string } 
 
 export function adaptTimelineEvent(e: BackendTimelineEvent): CaseEvent {
   const content = e.text_content || e.text || "Event logged";
-  const { date, ts } = parseDateTime(e.timestamp);
+  // Event time ONLY. Never fall back to the ingestion timestamp — that would
+  // misrepresent when the activity happened.
+  const eventTime = e.event_time ?? e.timestamp ?? null;
+  const { date, ts } = parseDateTime(eventTime);
+  const needsNormalization = e.time_status === "TIME_NORMALIZATION_REQUIRED" || !eventTime;
 
   // Extract entity names or references from metadata
   const entityIds: string[] = [];
@@ -47,11 +51,14 @@ export function adaptTimelineEvent(e: BackendTimelineEvent): CaseEvent {
 
   return {
     id: e.id,
-    date,
-    ts,
+    date: needsNormalization ? "Time unknown" : date,
+    ts: needsNormalization ? "—" : ts,
     kind: classifyEventKind(e.event_type, content),
     label: content,
     entityIds,
     evidenceIds,
+    timeStatus: e.time_status || (needsNormalization ? "TIME_NORMALIZATION_REQUIRED" : "OK"),
+    ingestedAt: e.ingested_at ?? null,
+    isRoutine: e.is_routine === true,
   };
 }

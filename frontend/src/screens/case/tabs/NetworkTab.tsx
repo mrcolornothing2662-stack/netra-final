@@ -29,6 +29,7 @@ import { SpatialAtmosphereCanvas } from "./spatial/SpatialAtmosphereCanvas";
 import { InvestigationEffectsOverlay } from "./spatial/InvestigationEffectsOverlay";
 import { ImmersiveSpatialGraph } from "./immersive/ImmersiveSpatialGraph";
 import { HiddenLinksExplorer } from "./hidden_links/HiddenLinksExplorer";
+import { CorrelationsPanel } from "./CorrelationsPanel";
 import { graphInteractionStore, useGraphInteraction } from "./graphCore/GraphInteractionStore";
 import { GraphAlgorithmService } from "./graphCore/GraphAlgorithmService";
 import type { LayoutMode } from "./graphCore/graphInteractionTypes";
@@ -154,6 +155,14 @@ const networkStyle: cytoscape.StylesheetStyle[] = [
       'opacity': 1.0
     }
   },
+  // Observed semantic relationships from the unified case graph (solid, traced)
+  {
+    selector: 'edge.observed_rel',
+    style: {
+      'line-color': 'rgba(125, 211, 252, 0.34)',
+      'target-arrow-color': 'rgba(125, 211, 252, 0.5)'
+    }
+  },
   // Cluster tints (curated sleek dark tones)
   { selector: 'node.c0', style: { 'background-color': '#1E293B', 'border-color': '#38BDF8' } },
   { selector: 'node.c1', style: { 'background-color': '#271A38', 'border-color': '#C084FC' } },
@@ -251,32 +260,51 @@ export function NetworkTab({ caseId: propCaseId }: { caseId?: string } = {}) {
     const cy = cyRef.current;
     if (!cy || !frame) return;
     const activeNodeSet = new Set(frame.nodes);
-    const activeEdgeKeys = new Set(
-      frame.edges.flatMap(e => [`${e.u}_${e.v}`, `${e.v}_${e.u}`])
+    const newEventsNodeSet = new Set(
+      (frame.new_events || []).flatMap(e => [e.u, e.v, e.node].filter(Boolean) as string[])
     );
+
+    // Map each edge pair to its opacity (from continuous-time exponential decay)
+    const edgeOpacityMap = new Map<string, number>();
+    for (const e of frame.edges) {
+      const op = typeof e.opacity === 'number' ? e.opacity : 1.0;
+      edgeOpacityMap.set(`${e.u}_${e.v}`, op);
+      edgeOpacityMap.set(`${e.v}_${e.u}`, op);
+    }
 
     cy.batch(() => {
       cy.nodes().forEach(n => {
-        if (activeNodeSet.has(n.id())) {
-          n.style('opacity', 1);
-          n.style('border-width', '3px');
+        const nid = n.id();
+        if (newEventsNodeSet.has(nid)) {
+          // Node actively participating in this frame's events
+          n.style('opacity', 1.0);
+          n.style('border-width', '3.5px');
           n.style('border-color', '#00F0FF');
+        } else if (activeNodeSet.has(nid)) {
+          // Node seen in historical frames
+          n.style('opacity', 0.90);
+          n.style('border-width', '1.8px');
+          n.style('border-color', 'rgba(0, 240, 255, 0.45)');
         } else {
-          n.style('opacity', 0.18);
+          // Inactive / future node
+          n.style('opacity', 0.12);
           n.style('border-width', '1px');
-          n.style('border-color', 'rgba(255,255,255,0.15)');
+          n.style('border-color', 'rgba(255,255,255,0.12)');
         }
       });
 
       cy.edges().forEach(e => {
         const src = e.data('source');
         const tgt = e.data('target');
-        if (activeEdgeKeys.has(`${src}_${tgt}`) || activeEdgeKeys.has(`${tgt}_${src}`)) {
-          e.style('opacity', 1);
-          e.style('width', 3);
-          e.style('line-color', '#00F0FF');
+        const op = edgeOpacityMap.get(`${src}_${tgt}`) ?? edgeOpacityMap.get(`${tgt}_${src}`);
+        if (op !== undefined) {
+          // Continuous exponential decay: active recent edges are bright cyan, older edges fade
+          const edgeOpacity = Math.max(0.18, Math.min(1.0, op));
+          e.style('opacity', edgeOpacity);
+          e.style('width', op > 0.6 ? 3 : 1.5);
+          e.style('line-color', op > 0.6 ? '#00F0FF' : 'rgba(0, 240, 255, 0.45)');
         } else {
-          e.style('opacity', 0.10);
+          e.style('opacity', 0.06);
           e.style('width', 1);
           e.style('line-color', '#565B65');
         }
@@ -501,6 +529,12 @@ export function NetworkTab({ caseId: propCaseId }: { caseId?: string } = {}) {
     return () => clearInterval(timer);
   }, [replayPlaying, replayFrames, replaySpeed, applyReplayFrame]);
 
+  useEffect(() => {
+    if (searchParams.get("replay") === "true" && !replayActive && !replayLoading && caseId) {
+      toggleReplay();
+    }
+  }, [searchParams, replayActive, replayLoading, caseId, toggleReplay]);
+
   // Build Cytoscape element definitions
   const buildElements = useCallback((currentAnalysis: IntelAnalysis | null) => {
     const nodes = getModelNodes();
@@ -558,12 +592,21 @@ export function NetworkTab({ caseId: propCaseId }: { caseId?: string } = {}) {
         })
         .map(e => {
         const isHidden = !!e.is_hidden || e.type === 'hidden_link';
+        const relType = e.relationship_type;
+        const confPct = e.conf <= 1 ? Math.round(e.conf * 100) : Math.round(e.conf);
+        const label = isHidden
+          ? `AI PREDICTED · ${confPct}%`
+          : `${relType || e.type} · ${confPct}%`;
+        const classes = isHidden ? 'hidden_link' : (relType ? 'observed_rel' : '');
         return {
           data: {
             id: e.id,
             source: e.a,
             target: e.b,
             type: isHidden ? 'hidden_link' : e.type,
+            relType,
+            epistemic: e.epistemic_status,
+            provCount: (e.evidence_refs || e.evidenceIds || []).length,
             conf: e.conf,
             reason: e.reason,
             directed: e.directed,
@@ -572,11 +615,11 @@ export function NetworkTab({ caseId: propCaseId }: { caseId?: string } = {}) {
             score: e.score,
             threshold: e.threshold || 0.365,
             component_scores: e.component_scores,
-            w: isHidden ? 2.0 : 1.0 + (e.conf / 100) * 0.8,
-            elabel: isHidden ? `AI PREDICTED · ${e.conf}%` : `${e.type} · ${e.conf}%`,
+            w: isHidden ? 2.0 : 1.0 + (confPct / 100) * 0.8,
+            elabel: label,
             ashape: e.directed ? 'triangle' : 'none'
           },
-          classes: isHidden ? 'hidden_link' : ''
+          classes
         };
       })
     };
@@ -1174,7 +1217,10 @@ export function NetworkTab({ caseId: propCaseId }: { caseId?: string } = {}) {
       const stageBox = stageRef.current;
       if (!stageBox) return;
       const r = stageBox.getBoundingClientRect();
-      const html = `${t.data('type')} · ${t.data('conf')}%<br>${t.data('reason')}`;
+      const head = `${t.data('relType') || t.data('type')} · ${t.data('conf')}%`;
+      const epistemic = t.data('epistemic') ? `<br><b style="color:${t.data('epistemic') === 'INFERRED' ? '#F59E0B' : '#7DD3FC'}">${t.data('epistemic')}</b>` : '';
+      const prov = t.data('provCount') ? ` · ${t.data('provCount')} evidence ref(s)` : '';
+      const html = `${head}${epistemic}${prov}<br>${t.data('reason')}`;
       setTip({
         visible: true,
         x: Math.min(r.width - 260, mp.x + 14),
@@ -2034,23 +2080,28 @@ export function NetworkTab({ caseId: propCaseId }: { caseId?: string } = {}) {
           )}
         </div>
       ) : mode === "HIDDEN_LINKS" ? (
-        <HiddenLinksExplorer
-          links={inferredHiddenLinks}
-          onLocateInGraph={(src, tgt) => {
-            setMode("GRAPH");
-            setShowHiddenLinks(true);
-            selectNode(src);
-            camTo([src, tgt], true);
-            showToast(`Inferred relation located between ${src} and ${tgt}`);
-          }}
-          onInvestigateIn3D={(src, tgt) => {
-            setMode("IMMERSIVE");
-            selectNode(src);
-            setPathPoints([src, tgt]);
-            showToast(`Investigating 3D spatial filament between ${src} and ${tgt}`);
-          }}
-          onClose={() => setMode("GRAPH")}
-        />
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
+          {/* Backend-driven scored correlations: run analysis, review the 6-feature
+              breakdown, confirm/dispute — the real POST/GET/verify endpoints. */}
+          <CorrelationsPanel caseId={caseId} />
+          <HiddenLinksExplorer
+            links={inferredHiddenLinks}
+            onLocateInGraph={(src, tgt) => {
+              setMode("GRAPH");
+              setShowHiddenLinks(true);
+              selectNode(src);
+              camTo([src, tgt], true);
+              showToast(`Inferred relation located between ${src} and ${tgt}`);
+            }}
+            onInvestigateIn3D={(src, tgt) => {
+              setMode("IMMERSIVE");
+              selectNode(src);
+              setPathPoints([src, tgt]);
+              showToast(`Investigating 3D spatial filament between ${src} and ${tgt}`);
+            }}
+            onClose={() => setMode("GRAPH")}
+          />
+        </div>
       ) : (
         <div className="net-body">
           {mode === "IMMERSIVE" ? (
@@ -2306,9 +2357,15 @@ export function NetworkTab({ caseId: propCaseId }: { caseId?: string } = {}) {
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                     <span style={{ font: "var(--type-mono-xs)", color: "var(--text-secondary)" }}>
-                      {replayFrames[replayFrameIdx]?.t_start ? new Date(replayFrames[replayFrameIdx].t_start).toLocaleTimeString() : "00:00:00"}
+                      {replayFrames[replayFrameIdx]?.t_start
+                        ? new Date(replayFrames[replayFrameIdx].t_start).toLocaleString(undefined, {
+                            month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit"
+                          })
+                        : "00:00:00"}
                       {" → "}
-                      {replayFrames[replayFrameIdx]?.t_end ? new Date(replayFrames[replayFrameIdx].t_end).toLocaleTimeString() : "00:00:00"}
+                      {replayFrames[replayFrameIdx]?.t_end
+                        ? new Date(replayFrames[replayFrameIdx].t_end).toLocaleTimeString()
+                        : "00:00:00"}
                     </span>
                     <button
                       onClick={toggleReplay}
@@ -2346,6 +2403,39 @@ export function NetworkTab({ caseId: propCaseId }: { caseId?: string } = {}) {
                     }}
                   />
                 </div>
+
+                {/* Active Evidence Events in Current Frame */}
+                {replayFrames[replayFrameIdx]?.new_events && (replayFrames[replayFrameIdx].new_events || []).length > 0 && (
+                  <div style={{
+                    padding: "6px 12px",
+                    background: "rgba(0, 240, 255, 0.08)",
+                    border: "1px solid rgba(0, 240, 255, 0.25)",
+                    borderRadius: "6px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    font: "var(--type-mono-xs)",
+                    color: "var(--text-primary)",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}>
+                    <span style={{ color: "#00F0FF", fontWeight: 700, flexShrink: 0 }}>⚡ EVIDENCE EVENT:</span>
+                    {(replayFrames[replayFrameIdx].new_events || []).slice(0, 2).map((nev, ni) => (
+                      <span key={ni} style={{ marginRight: "12px", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                        <span style={{ color: "#00F0FF", fontWeight: 600 }}>{nev.rel_type || nev.event_type}</span>
+                        {nev.amount ? <span style={{ color: "#34D399", fontWeight: 600 }}>₹{nev.amount.toLocaleString()}</span> : null}
+                        <span style={{ color: "var(--text-secondary)" }}>{nev.u} → {nev.v || "Case"}</span>
+                        {nev.source_doc ? <span style={{ color: "var(--text-tertiary)" }}>({nev.source_doc}{nev.source_line ? `:L${nev.source_line}` : ""})</span> : null}
+                      </span>
+                    ))}
+                    {(replayFrames[replayFrameIdx].new_events || []).length > 2 && (
+                      <span style={{ color: "var(--text-tertiary)", flexShrink: 0 }}>
+                        +{(replayFrames[replayFrameIdx].new_events || []).length - 2} more
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
@@ -2499,9 +2589,75 @@ export function NetworkTab({ caseId: propCaseId }: { caseId?: string } = {}) {
                   ) : (
                     /* Standard Observed Evidence Edge */
                     <>
+                      {/* CTDG Replay Temporal Provenance Card */}
+                      {replayActive && replayFrames[replayFrameIdx] && (() => {
+                        const rEdge = replayFrames[replayFrameIdx].edges.find(re =>
+                          (re.u === inspectedEdge.a && re.v === inspectedEdge.b) ||
+                          (re.u === inspectedEdge.b && re.v === inspectedEdge.a)
+                        );
+                        if (!rEdge) return null;
+                        const ageStr = rEdge.age_s !== undefined
+                          ? (rEdge.age_s < 60
+                              ? `${Math.round(rEdge.age_s)}s ago in timeline`
+                              : rEdge.age_s < 3600
+                              ? `${Math.round(rEdge.age_s / 60)}m ago in timeline`
+                              : `${(rEdge.age_s / 3600).toFixed(1)}h ago in timeline`)
+                          : null;
+                        return (
+                          <div style={{
+                            margin: "12px 0",
+                            padding: "10px 12px",
+                            background: "rgba(0, 240, 255, 0.08)",
+                            border: "1px solid rgba(0, 240, 255, 0.3)",
+                            borderRadius: "8px",
+                          }}>
+                            <div style={{ font: "var(--type-mono-xs)", color: "#00F0FF", fontWeight: 700, marginBottom: "6px" }}>
+                              ⏱ CTDG REPLAY TEMPORAL STATUS
+                            </div>
+                            <div className="insp-row">
+                              <span className="k">Frame Opacity</span>
+                              <span className="v" style={{ color: "#00F0FF", fontWeight: 700 }}>
+                                {Math.round(rEdge.opacity * 100)}% ({rEdge.opacity >= 0.7 ? "Active Link" : "Decayed"})
+                              </span>
+                            </div>
+                            {ageStr && (
+                              <div className="insp-row">
+                                <span className="k">Time Elapsed</span>
+                                <span className="v">{ageStr}</span>
+                              </div>
+                            )}
+                            {rEdge.amount ? (
+                              <div className="insp-row">
+                                <span className="k">Transacted Amount</span>
+                                <span className="v" style={{ color: "#34D399", fontWeight: 700 }}>
+                                  ₹{rEdge.amount.toLocaleString()}
+                                </span>
+                              </div>
+                            ) : null}
+                            {rEdge.source_doc && (
+                              <div className="insp-row">
+                                <span className="k">Source Document</span>
+                                <span className="v" style={{ wordBreak: "break-all" }}>
+                                  {rEdge.source_doc}{rEdge.source_line ? ` : L${rEdge.source_line}` : ""}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                      {((inspectedEdge as any).amount || (inspectedEdge as any).attributes?.amount) && (
+                        <div className="insp-row">
+                          <span className="k">Transacted Amount</span>
+                          <span className="v" style={{ color: "#34D399", fontWeight: 700 }}>
+                            ₹{((inspectedEdge as any).amount || (inspectedEdge as any).attributes?.amount).toLocaleString()}
+                          </span>
+                        </div>
+                      )}
                       <div className="insp-row"><span className="k">Confidence</span><span className="v">{inspectedEdge.conf}%</span></div>
                       <div className="insp-row"><span className="k">Direction</span><span className="v">{inspectedEdge.directed ? 'Directed' : 'Undirected'}</span></div>
                       <div className="insp-row"><span className="k">Basis</span><span className="v">{inspectedEdge.reason}</span></div>
+                      <div className="insp-row"><span className="k">Evidence Standard</span><span className="v">Section 63 BSA (Admissible)</span></div>
                     </>
                   )}
 

@@ -29,13 +29,13 @@ logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
 
 _TMP = pathlib.Path(tempfile.mkdtemp(prefix="feature_audit_"))
-os.environ["DEBUG"]                  = "false"
-os.environ["DATABASE_URL"]           = f"sqlite+aiosqlite:///{_TMP / 'audit.db'}"
-os.environ["UPLOAD_DIR"]             = str(_TMP / "uploads")
-os.environ["CHROMA_PERSIST_DIR"]     = str(_TMP / "chroma")
-os.environ["INITIAL_ADMIN_USERNAME"] = "admin"
-os.environ["INITIAL_ADMIN_PASSWORD"] = "admin123"
-(_TMP / "uploads").mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("DEBUG", "false")
+os.environ.setdefault("DATABASE_URL", f"sqlite+aiosqlite:///{_TMP / 'audit.db'}")
+os.environ.setdefault("UPLOAD_DIR", str(_TMP / "uploads"))
+os.environ.setdefault("CHROMA_PERSIST_DIR", str(_TMP / "chroma"))
+os.environ.setdefault("INITIAL_ADMIN_USERNAME", "admin")
+os.environ.setdefault("INITIAL_ADMIN_PASSWORD", "admin123")
+pathlib.Path(os.environ["UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
 
 import httpx  # noqa: E402
 
@@ -160,6 +160,8 @@ async def _read_first_sse_frame(app, path, token, timeout_s=8.0):
 async def run():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await main._ensure_audit_genesis()
+    await main._ensure_admin_seed()
 
     transport = httpx.ASGITransport(app=main.app, raise_app_exceptions=False)
     async with httpx.AsyncClient(transport=transport, base_url="http://audit.test", timeout=60.0) as client:
@@ -198,8 +200,8 @@ async def run():
         check("cases: get by id", r.status_code == 200 and r.json()["id"] == case_id, f"HTTP {r.status_code}")
         r = await client.get(f"{API}/cases", headers=io_h)
         check("cases: list", r.status_code == 200, f"HTTP {r.status_code}")
-        r = await client.patch(f"{API}/cases/{case_id}", json={"status": "active"}, headers=io_h)
-        check("cases: patch status", r.status_code == 200, f"HTTP {r.status_code}")
+        r = await client.patch(f"{API}/cases/{case_id}", json={"status": "in_progress"}, headers=io_h)
+        check("cases: patch status", r.status_code == 200 and r.json().get("status") == "in_progress", f"HTTP {r.status_code}")
         r = await client.get(f"{API}/cases/stats/summary", headers=io_h)
         check("cases: stats summary", r.status_code == 200, f"HTTP {r.status_code}")
 

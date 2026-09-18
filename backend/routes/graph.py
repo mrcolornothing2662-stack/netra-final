@@ -7,18 +7,64 @@ POST /query/{case_id}   — TF-IDF retrieval (zero generation, zero hallucinatio
 from __future__ import annotations
 
 import uuid
+from datetime import timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Correlation, Entity, EntityMention, EvidenceEvent, User
+from db.models import Correlation, Entity, EntityMention, EvidenceEvent, Relationship, User
 from db.session import get_db
 from graph.graph_builder import graph_to_json, build_case_graph, select_relevant_subgraph
+from graph import relationship_types as RT
 from routes.auth import get_current_user
 from routes.case_access import require_case_access
 
 router = APIRouter()
+
+
+def _is_routine_event(meta: dict | None) -> bool:
+    """True ONLY when the source explicitly marks the event as routine.
+
+    Routine-ness is never inferred from narration/description text — a text
+    heuristic could hide genuinely important evidence. Accepted explicit
+    markers on the event metadata:
+      • meta["routine"] is True
+      • meta["is_routine"] is True
+      • meta["event_category"] == "routine"
+    Anything else is non-routine.
+    """
+    meta = meta or {}
+    if meta.get("routine") is True or meta.get("is_routine") is True:
+        return True
+    return str(meta.get("event_category") or "").strip().lower() == "routine"
+
+
+def _relationship_to_dict(rel: Relationship, value_lookup: dict[str, str]) -> dict:
+    """Serialise a persisted Relationship into the API contract."""
+    return {
+        "id":                str(rel.id),
+        "source":            value_lookup.get(str(rel.source_entity_id)),
+        "target":            value_lookup.get(str(rel.target_entity_id)),
+        "source_entity_id":  str(rel.source_entity_id),
+        "target_entity_id":  str(rel.target_entity_id),
+        "relationship_type": rel.relationship_type,
+        "direction":         rel.direction,
+        "epistemic_status":  rel.epistemic_status,
+        "confidence":        rel.confidence,
+        "amount":            rel.amount,
+        "event_timestamp":   rel.event_timestamp.isoformat() if rel.event_timestamp else None,
+        "first_seen":        rel.first_seen.isoformat() if rel.first_seen else None,
+        "last_seen":         rel.last_seen.isoformat() if rel.last_seen else None,
+        "observation_count": rel.observation_count,
+        "attributes":        rel.attributes or {},
+        "evidence_refs":     rel.evidence_refs or [],
+        "event_refs":        rel.event_refs or [],
+        "source_engine":     rel.source_engine,
+        "engine_version":    rel.engine_version,
+        "component_scores":  rel.component_scores or {},
+        "reason_codes":      rel.reason_codes or [],
+    }
 
 @router.get("/{case_id}")
 async def get_graph(
@@ -36,6 +82,7 @@ async def get_graph(
     """Return graph JSON for the case — nodes, edges, and flagged hidden links."""
     entities = []
     correlations = []
+    relationships = []
     events = []
     mentions_by_event: dict[str, list[dict]] = {}
     evidence_sources_by_entity: dict[str, list[dict]] = {}
@@ -52,6 +99,10 @@ async def get_graph(
 
             correlations = (await db.execute(
                 select(Correlation).where(Correlation.case_id == target_case_uuid, Correlation.decision == "flagged")
+            )).scalars().all()
+
+            relationships = (await db.execute(
+                select(Relationship).where(Relationship.case_id == target_case_uuid)
             )).scalars().all()
 
             events = (await db.execute(
@@ -160,6 +211,42 @@ async def get_graph(
     # Add hidden link edges — exclude AMOUNT entities which are not investigatively meaningful
     entity_values = {str(entity.id): entity.canonical_value for entity in entities}
     entity_types = {str(entity.id): entity.entity_type for entity in entities}
+
+    # ── Overlay persisted Case Graph relationships (observed + inferred) ─────
+    # The graph now consumes structured relationships instead of inventing
+    # co-occurrence meaning. Each drawn edge keeps its semantic type, epistemic
+    # status and evidence provenance.
+    relationship_edges: list[dict] = []
+    for rel in relationships:
+        a_val = entity_values.get(str(rel.source_entity_id))
+        b_val = entity_values.get(str(rel.target_entity_id))
+        if not a_val or not b_val or a_val == b_val:
+            continue
+        provenance = {
+            "relationship_type": rel.relationship_type,
+            "epistemic_status": rel.epistemic_status,
+            "direction": rel.direction,
+            "confidence": rel.confidence,
+            "amount": rel.amount,
+            "evidence_refs": rel.evidence_refs or [],
+            "event_refs": rel.event_refs or [],
+            "observation_count": rel.observation_count,
+        }
+        if G.has_edge(a_val, b_val):
+            # Drawn edges prefer observed provenance; inferred links are surfaced
+            # separately as dashed hidden_edges below.
+            if rel.epistemic_status == RT.OBSERVED or G[a_val][b_val].get("relationship_type") is None:
+                G[a_val][b_val].update(provenance)
+        else:
+            G.add_edge(
+                a_val, b_val,
+                edge_type=rel.relationship_type,
+                weight=rel.observation_count or 1,
+                timestamps=[],
+                **provenance,
+            )
+        relationship_edges.append(_relationship_to_dict(rel, entity_values))
+
     EXCLUDED_HIDDEN_LINK_TYPES = {"AMOUNT", "KEYWORD"}
     hidden_edges = []
     for c in sorted(correlations, key=lambda item: item.final_score, reverse=True):
@@ -177,6 +264,7 @@ async def get_graph(
             "source_type":  a_type,
             "target_type":  b_type,
             "edge_type":    "hidden_link",
+            "epistemic_status": RT.INFERRED,
             "weight":       round(c.final_score, 4),
             "score":        c.final_score,
             "threshold":    c.threshold,
@@ -201,6 +289,7 @@ async def get_graph(
                         "source": r.entities[0],
                         "target": r.entities[1],
                         "edge_type": "hidden_link",
+                        "epistemic_status": RT.INFERRED,
                         "weight": round(r.final_score, 4),
                         "score": r.final_score,
                         "threshold": r.threshold,
@@ -230,6 +319,15 @@ async def get_graph(
         node["evidence_sources"] = evidence_sources_by_entity.get(node["id"], [])[:10]
 
     graph_data["hidden_edges"] = hidden_edges
+    visible_relationships = [
+        r for r in relationship_edges
+        if r["source"] in visible_nodes and r["target"] in visible_nodes
+    ]
+    graph_data["relationships"] = {
+        "observed": [r for r in visible_relationships if r["epistemic_status"] == RT.OBSERVED],
+        "inferred": [r for r in visible_relationships if r["epistemic_status"] == RT.INFERRED],
+        "total":    len(visible_relationships),
+    }
     graph_data["case_id"]      = case_id
     graph_data["selection"] = {
         "scope": scope,
@@ -260,41 +358,78 @@ async def get_timeline(
     db:        AsyncSession = Depends(get_db),
     current:   User = Depends(get_current_user),
 ):
-    """All evidence events for a case, sorted chronologically."""
+    """
+    All evidence events for a case, ordered by *event time* (not ingestion time).
+
+    event_time and ingested_at are strictly distinct:
+      • event_time  = when the underlying activity actually happened (source clock)
+      • ingested_at = when NETRA received/processed the artifact
+
+    If an event has no usable event time it is surfaced as
+    TIME_NORMALIZATION_REQUIRED rather than silently substituting the ingestion
+    timestamp. The timeline never invents certainty.
+    """
     c = await require_case_access(db, current, case_id)
     case_uuid = c.id
     q = select(EvidenceEvent).where(EvidenceEvent.case_id == case_uuid)
 
     if event_type and event_type != "all":
         q = q.where(EvidenceEvent.event_type == event_type)
-    q = q.order_by(EvidenceEvent.created_at.desc()).limit(limit)
 
-    events = (await db.execute(q)).scalars().all()
+    events = list((await db.execute(q)).scalars().all())
 
-    if not events:
-        return {
-            "case_id": case_id,
-            "count": 0,
-            "events": []
-        }
+    # Sort chronologically by event_time; events without an event_time are kept
+    # but ordered last (never dropped, never back-filled with ingestion time).
+    # Comparison is epoch-based so naive (SQLite) and tz-aware (Postgres)
+    # datetimes are never compared directly — that raises TypeError.
+    def _epoch(dt) -> float:
+        if dt is None:
+            return float("-inf")
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+
+    def _sort_key(ev: EvidenceEvent):
+        return (ev.event_timestamp is None, _epoch(ev.event_timestamp or ev.created_at))
+
+    events.sort(key=_sort_key)
+    total_available = len(events)
+    events = events[:limit]
+
+    serialized = []
+    for ev in events:
+        event_time = ev.event_timestamp.isoformat() if ev.event_timestamp else None
+        ingested_at = ev.created_at.isoformat() if ev.created_at else None
+        time_status = "OK" if event_time else "TIME_NORMALIZATION_REQUIRED"
+        meta = ev.event_metadata or {}
+        is_routine = _is_routine_event(meta)
+        serialized.append({
+            "id":          str(ev.id),
+            "event_time":  event_time,
+            # Backward-compatible alias — event time ONLY, never ingestion time.
+            "timestamp":   event_time,
+            "ingested_at": ingested_at,
+            "time_status": time_status,
+            "event_type":  ev.event_type,
+            "is_routine":  is_routine,
+            "text":        (ev.text_content or "")[:300],
+            "text_content": (ev.text_content or "")[:300],
+            "source_doc":  meta.get("source_doc"),
+            "source_line": ev.source_line,
+            "source_page": ev.source_page,
+            "metadata":    meta,
+        })
 
     return {
         "case_id": case_id,
-        "count":   len(events),
-        "events":  [
-            {
-                "id":         str(ev.id),
-                "timestamp":  ev.event_timestamp.isoformat() if ev.event_timestamp else ev.created_at.isoformat(),
-                "event_type": ev.event_type,
-                "text":       (ev.text_content or "")[:300],
-                "text_content": (ev.text_content or "")[:300],
-                "source_doc": ev.event_metadata.get("source_doc") if ev.event_metadata else None,
-                "source_line": ev.source_line,
-                "source_page": ev.source_page,
-                "metadata":   ev.event_metadata or {},
-            }
-            for ev in events
-        ],
+        "count":   len(serialized),
+        "total_available": total_available,
+        "time_normalization_required": sum(
+            1 for e in serialized if e["time_status"] != "OK"
+        ),
+        "routine_count": sum(1 for e in serialized if e["is_routine"]),
+        "order": "event_time",
+        "events":  serialized,
     }
 
 
@@ -353,4 +488,65 @@ async def query_case(
         "question": question,
         "mode":     "retrieval-only",
         "results":  snippets,
+    }
+
+
+# ── Relationship explorer (unified case graph edges) ──────────────────────────
+
+relationships_router = APIRouter()
+
+
+@relationships_router.get("/{case_id}")
+async def list_relationships(
+    case_id:           str,
+    epistemic_status:  str | None = Query(None, pattern="^(OBSERVED|INFERRED)$"),
+    relationship_type: str | None = Query(None),
+    limit:             int = Query(200, ge=1, le=1000),
+    db:                AsyncSession = Depends(get_db),
+    current:           User = Depends(get_current_user),
+):
+    """
+    List persisted case-graph relationships — the same edges the graph renders —
+    each with semantic type, epistemic status and evidence/event provenance.
+    """
+    c = await require_case_access(db, current, case_id)
+
+    q = select(Relationship).where(Relationship.case_id == c.id)
+    if epistemic_status:
+        q = q.where(Relationship.epistemic_status == epistemic_status)
+    if relationship_type:
+        q = q.where(Relationship.relationship_type == relationship_type)
+    q = q.order_by(Relationship.created_at.desc()).limit(limit)
+    rows = (await db.execute(q)).scalars().all()
+
+    entity_ids: set = set()
+    for rel in rows:
+        entity_ids.add(rel.source_entity_id)
+        entity_ids.add(rel.target_entity_id)
+
+    entities_map: dict[str, Entity] = {}
+    if entity_ids:
+        found = (await db.execute(
+            select(Entity).where(Entity.id.in_(list(entity_ids)))
+        )).scalars().all()
+        entities_map = {str(e.id): e for e in found}
+
+    value_lookup = {eid: e.canonical_value for eid, e in entities_map.items()}
+
+    def _detail(rel: Relationship) -> dict:
+        detail = _relationship_to_dict(rel, value_lookup)
+        source = entities_map.get(str(rel.source_entity_id))
+        target = entities_map.get(str(rel.target_entity_id))
+        detail["source_type"] = source.entity_type if source else "UNKNOWN"
+        detail["target_type"] = target.entity_type if target else "UNKNOWN"
+        return detail
+
+    observed = [r for r in rows if r.epistemic_status == RT.OBSERVED]
+    inferred = [r for r in rows if r.epistemic_status == RT.INFERRED]
+    return {
+        "case_id":        case_id,
+        "count":          len(rows),
+        "observed_count": len(observed),
+        "inferred_count": len(inferred),
+        "relationships":  [_detail(r) for r in rows],
     }

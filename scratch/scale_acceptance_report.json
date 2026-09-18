@@ -1,0 +1,66 @@
+{
+  "timestamp": "2026-09-18T11:32:10Z",
+  "dataset": {
+    "zip_path": "/Users/shubhamrana/netra5.0/NETRA_Large_Synthetic_Case.zip",
+    "zip_size_bytes": 284204
+  },
+  "ingestion": {
+    "total_files": 12,
+    "processed_count": 12,
+    "failed_count": 0,
+    "upload_seconds": 0.03,
+    "parsing_seconds": 82.11,
+    "total_ingestion_seconds": 82.14
+  },
+  "database_metrics": {
+    "total_events": 18363,
+    "events_by_type": {
+      "bank_txn": 4300,
+      "call": 4700,
+      "document_text": 2,
+      "text_record": 5356,
+      "whatsapp_msg": 4005
+    },
+    "total_entities": 1739,
+    "entities_by_type": {
+      "PER": 18,
+      "EMAIL": 42,
+      "TRANSACTION": 606,
+      "PHONE": 23,
+      "UPI": 20,
+      "AMOUNT": 10,
+      "DEVICE": 915,
+      "DATE": 77,
+      "KEYWORD": 3,
+      "IP": 17,
+      "LOCATION": 8
+    },
+    "total_mentions": 39154,
+    "total_relationships": 1833,
+    "duplicate_entities": 0
+  },
+  "engine_benchmarks": {
+    "behavioral_anomaly_profiler_ms": 2803.89,
+    "crime_script_matcher_ms": 2471.43,
+    "golden_hours_engine_ms": 571.26,
+    "confidence_meter_ms": 170.3,
+    "defence_bot_ms": 354.77,
+    "hypothesis_board_ms": 135.45,
+    "syndicate_radar_ms": 292.44,
+    "compliance_shield_ms": 106.01,
+    "network_replay_ms": 31243.37,
+    "network_graph_ms": 11495.39
+  },
+  "provenance_audit": {
+    "preservation_score": 1.0,
+    "hashed_files": 12,
+    "total_files": 12,
+    "bsa_compliant": true
+  },
+  "system_resources": {
+    "initial_memory_mb": 59.84,
+    "final_memory_mb": 156.55,
+    "memory_delta_mb": 96.71,
+    "total_duration_seconds": 136.18
+  }
+}

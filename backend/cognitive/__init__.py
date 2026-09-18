@@ -93,3 +93,10 @@ def get_benchmark_engine():
     """Feature 11: Synthetic Benchmark Generator."""
     from . import benchmark as mod
     return mod
+
+
+def get_training_engine():
+    """Feature 11: Training Simulator & Evaluation Layer."""
+    from . import training as mod
+    return mod
+

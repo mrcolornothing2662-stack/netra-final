@@ -1,42 +1,368 @@
 {
   "_meta": {
-    "purpose": "Cyber-fraud MO playbook library (crime-script representation, Cornish 1994; structure modelled on MITRE Attack Flow's staged behavior sequencing). Sources for the staged patterns (verified 2026-09-06): I4C 'Digital Arrest' advisory (Mar 2025, i4c.mha.gov.in/advisories.aspx), NITI Aayog 'Digital Arrest: The Modern-Day Cyber Scam' (Apr 2025), NCRP-reported investment/task-fraud pattern. Detectors are regex fragments over normalized chat text — extend via this file only, never in code.",
+    "purpose": "Cyber-fraud MO playbook library (crime-script representation, Cornish 1994; structure modelled on MITRE Attack Flow's staged behavior sequencing). Sources for the staged patterns (verified 2026-09-06): I4C 'Digital Arrest' advisory (Mar 2025, i4c.mha.gov.in/advisories.aspx), NITI Aayog 'Digital Arrest: The Modern-Day Cyber Scam' (Apr 2025), NCRP-reported investment/task-fraud pattern. Detectors are regex fragments over normalized text, transactions, and event transcripts — extend via this file only, never in code.",
     "scoring": "Sequence similarity via normalized Levenshtein edit distance on stage tokens (DTW is for numeric series, not categorical scripts). Output is labelled SIMILARITY, never 'match probability'."
   },
   "playbooks": [
     {
       "name": "DIGITAL_ARREST_EXTORTION",
+      "description": "Impersonation of law enforcement/regulatory authorities via spoofed notices and video interrogation, demanding high-value clearance transfers.",
       "source": "I4C Digital Arrest advisory (Mar 2025); NITI Aayog (Apr 2025)",
-      "stages": ["SPOOF_LE_NOTICE", "ISOLATION_VIDEO_CALL", "THREAT_ARREST", "EXTRACTION_TRANSFER", "DISPOSAL_BLOCK"],
+      "stages": [
+        "SPOOF_LE_NOTICE",
+        "ISOLATION_VIDEO_CALL",
+        "THREAT_ARREST",
+        "EXTRACTION_TRANSFER",
+        "DISPOSAL_BLOCK"
+      ],
       "detectors": {
-        "SPOOF_LE_NOTICE": ["notice", "cbi", "crime branch", "narcotics", "customs", "parcel", "arrest warrant", "fIR.{0,10}aapke naam", "police"],
-        "ISOLATION_VIDEO_CALL": ["video call", "skype", "whatsapp call", "camera on", "stay on call", "mat kaato call"],
-        "THREAT_ARREST": ["andar", "jail", "non-bailable", "remand", "girftar", "arrest hone", "supreme court ke aadesh", "darwaza band"],
-        "EXTRACTION_TRANSFER": ["transfer", "bhejo", "verification", "clearance", "rtsa", "account mein daalo", "otp"],
-        "DISPOSAL_BLOCK": ["block", "number delete", "chat delete", "kaam ho gaya", "close kar"]
+        "SPOOF_LE_NOTICE": [
+          "notice",
+          "cbi",
+          "crime branch",
+          "narcotics",
+          "customs",
+          "parcel",
+          "arrest warrant",
+          "fIR.{0,10}aapke naam",
+          "police",
+          "trafficking",
+          "dhl",
+          "fedex",
+          "mha",
+          "court summons"
+        ],
+        "ISOLATION_VIDEO_CALL": [
+          "video call",
+          "skype",
+          "whatsapp call",
+          "camera on",
+          "stay on call",
+          "mat kaato call",
+          "room lock",
+          "isolated",
+          "confidential interrogation",
+          "digital arrest"
+        ],
+        "THREAT_ARREST": [
+          "andar",
+          "jail",
+          "non-bailable",
+          "remand",
+          "girftar",
+          "arrest hone",
+          "supreme court ke aadesh",
+          "darwaza band",
+          "money laundering",
+          "financial crime",
+          "custody",
+          "seize all assets"
+        ],
+        "EXTRACTION_TRANSFER": [
+          "transfer",
+          "bhejo",
+          "verification",
+          "clearance",
+          "rtsa",
+          "account mein daalo",
+          "otp",
+          "security deposit",
+          "rbi clearance",
+          "supervisory account",
+          "security bond"
+        ],
+        "DISPOSAL_BLOCK": [
+          "block",
+          "number delete",
+          "chat delete",
+          "kaam ho gaya",
+          "close kar",
+          "call disconnect",
+          "destroy evidence",
+          "switch off"
+        ]
       }
     },
     {
       "name": "INVESTMENT_TASK_FRAUD",
+      "description": "Telegram/WhatsApp part-time task lure escalating to VIP prepaid tasks, frozen funds, and withdrawal extortion.",
       "source": "NCRP-reported dominant typology (investment/task scams)",
-      "stages": ["LURE_SMALL_PROFIT", "VIP_UPSELL", "EXTRACTION_LARGE_DEPOSIT", "WITHDRAWAL_BLOCK", "DISPOSAL_GHOST"],
+      "stages": [
+        "LURE_SMALL_PROFIT",
+        "VIP_UPSELL",
+        "EXTRACTION_LARGE_DEPOSIT",
+        "WITHDRAWAL_BLOCK",
+        "DISPOSAL_GHOST"
+      ],
       "detectors": {
-        "LURE_SMALL_PROFIT": ["daily profit", "part time", "task complete", "payout", "guaranteed return", "kamai"],
-        "VIP_UPSELL": ["vip", "level up", "premium member", "big task", "prepaid task"],
-        "EXTRACTION_LARGE_DEPOSIT": ["deposit", "invest karo", "add karo", "top up", " recharge"],
-        "WITHDRAWAL_BLOCK": ["withdrawal pending", "tax", "processing fee", "hold", "verify karo phir milega"],
-        "DISPOSAL_GHOST": ["account closed", "agent offline", "group left", "ban"]
+        "LURE_SMALL_PROFIT": [
+          "daily profit",
+          "part time",
+          "task complete",
+          "payout",
+          "guaranteed return",
+          "kamai",
+          "work from home",
+          "telegram task",
+          "youtube like",
+          "hotel review",
+          "credited bonus"
+        ],
+        "VIP_UPSELL": [
+          "vip",
+          "level up",
+          "premium member",
+          "big task",
+          "prepaid task",
+          "super bonus",
+          "tier upgrade",
+          "exclusive merchant"
+        ],
+        "EXTRACTION_LARGE_DEPOSIT": [
+          "deposit",
+          "invest karo",
+          "add karo",
+          "top up",
+          "recharge",
+          "capital investment",
+          "wallet recharge",
+          "fund allocation"
+        ],
+        "WITHDRAWAL_BLOCK": [
+          "withdrawal pending",
+          "tax",
+          "processing fee",
+          "hold",
+          "verify karo phir milega",
+          "unfreeze balance",
+          "credit score penalty",
+          "compliance fee"
+        ],
+        "DISPOSAL_GHOST": [
+          "account closed",
+          "agent offline",
+          "group left",
+          "ban",
+          "channel deleted",
+          "user not found",
+          "support disconnected"
+        ]
       }
     },
     {
       "name": "ROMANCE_BAITING",
+      "description": "Social engineering grooming establishing simulated romantic relationship leading to fabricated crisis and customs fees.",
       "source": "Long-standing NCRP-reported pattern",
-      "stages": ["GROOMING", "CRISIS_INVENTION", "EXTRACTION_GIFT", "DISPOSAL_GHOST"],
+      "stages": [
+        "GROOMING",
+        "CRISIS_INVENTION",
+        "EXTRACTION_GIFT",
+        "DISPOSAL_GHOST"
+      ],
       "detectors": {
-        "GROOMING": ["good morning", "miss you", "shaadi", "visa", "video dekho", "love you"],
-        "CRISIS_INVENTION": ["customs", "parcel stuck", "hospital", "emergency", "fine"],
-        "EXTRACTION_GIFT": ["send money", "bhej do", "gift", "help karo"],
-        "DISPOSAL_GHOST": ["bye forever", "delete", "never contact"]
+        "GROOMING": [
+          "good morning",
+          "miss you",
+          "shaadi",
+          "visa",
+          "video dekho",
+          "love you",
+          "soulmate",
+          "dear friend",
+          "sweetheart",
+          "beloved"
+        ],
+        "CRISIS_INVENTION": [
+          "customs",
+          "parcel stuck",
+          "hospital",
+          "emergency",
+          "fine",
+          "airport authority",
+          "foreign currency penalty",
+          "valuable consignment"
+        ],
+        "EXTRACTION_GIFT": [
+          "send money",
+          "bhej do",
+          "gift",
+          "help karo",
+          "customs clearance charge",
+          "courier fine",
+          "immediate transfer"
+        ],
+        "DISPOSAL_GHOST": [
+          "bye forever",
+          "delete",
+          "never contact",
+          "switched off",
+          "unreachable",
+          "profile deactivated"
+        ]
+      }
+    },
+    {
+      "name": "MULE_HARVESTING_AND_OFFRAMP",
+      "description": "Recruitment of bank/UPI account holders, credential takeover, multi-layer rapid dispersal, and cash/crypto off-ramps.",
+      "source": "I4C Mule Bank Account Typology & RBI Master Directions 2024",
+      "stages": [
+        "MULE_RECRUITMENT",
+        "ACCOUNT_TAKEOVER",
+        "RAPID_INBOUND_BURST",
+        "RAPID_LAYER2_DISPERSAL",
+        "CASHOUT_OFFRAMP"
+      ],
+      "detectors": {
+        "MULE_RECRUITMENT": [
+          "commission",
+          "rent account",
+          "student account",
+          "banking partner",
+          "atm handover",
+          "kit deliver",
+          "passbook rent",
+          "account provide"
+        ],
+        "ACCOUNT_TAKEOVER": [
+          "change mobile",
+          "update phone",
+          "netbanking password",
+          "sim swap",
+          "handover credentials",
+          "registered number changed",
+          "device binding update"
+        ],
+        "RAPID_INBOUND_BURST": [
+          "inbound transfer",
+          "multiple credits",
+          "upi credit",
+          "neft received",
+          "large credit",
+          "victim deposit",
+          "funds received"
+        ],
+        "RAPID_LAYER2_DISPERSAL": [
+          "immediate transfer",
+          "layer2",
+          "fan out",
+          "immediate debit",
+          "split amount",
+          "dispersal",
+          "rapid forwarding",
+          "pass through"
+        ],
+        "CASHOUT_OFFRAMP": [
+          "atm cash",
+          "atm withdrawal",
+          "pos swipe",
+          "crypto buy",
+          "usdt p2p",
+          "merchant qr",
+          "cash withdrawal",
+          "self withdrawal",
+          "offramp"
+        ]
+      }
+    },
+    {
+      "name": "LOAN_APP_HARASSMENT_EXTORTION",
+      "description": "Predatory instant micro-loans harvesting device permissions, charging usurious fees, and extorting through contact defamation.",
+      "source": "RBI Working Group on Digital Lending & NCRP Advisory",
+      "stages": [
+        "LURE_INSTANT_LOAN",
+        "CONTACT_DATA_SIPHON",
+        "USURIOUS_DEDUCTION",
+        "DEFAMATION_BLACKMAIL",
+        "REPEATED_EXTORTION"
+      ],
+      "detectors": {
+        "LURE_INSTANT_LOAN": [
+          "instant loan",
+          "paperless loan",
+          "5 min loan",
+          "no cibil",
+          "download apk",
+          "quick cash",
+          "urgent disbursement"
+        ],
+        "CONTACT_DATA_SIPHON": [
+          "contacts access",
+          "photos access",
+          "permission allowed",
+          "gallery backup",
+          "call log access",
+          "phonebook synced"
+        ],
+        "USURIOUS_DEDUCTION": [
+          "disbursed less",
+          "processing deduction",
+          "7 days tenure",
+          "high interest",
+          "deduction fee",
+          "overdue fine"
+        ],
+        "DEFAMATION_BLACKMAIL": [
+          "morph photo",
+          "send to family",
+          "contacts call",
+          "defame",
+          "fraudster notice",
+          "shame",
+          "call your relatives",
+          "legal threat"
+        ],
+        "REPEATED_EXTORTION": [
+          "repay again",
+          "penalty interest",
+          "re-loan",
+          "pay double",
+          "clear debt",
+          "extortion demand"
+        ]
+      }
+    },
+    {
+      "name": "SIM_BOX_CALL_FORWARDING",
+      "description": "VoIP bypass routing via multi-SIM gateways to terminate spoofed CLI calls and bypass telecom monitoring.",
+      "source": "DoT & I4C International Call Spoofing Advisory 2024",
+      "stages": [
+        "VOIP_INGRESS",
+        "LOCAL_GSM_TERMINATION",
+        "CALL_SPOOFING_VICTIM",
+        "OTP_INTERCEPTION"
+      ],
+      "detectors": {
+        "VOIP_INGRESS": [
+          "voip trunk",
+          "sip connection",
+          "international ip",
+          "virtual call",
+          "asterisk pbx",
+          "softswitch"
+        ],
+        "LOCAL_GSM_TERMINATION": [
+          "sim box",
+          "multi sim",
+          "gsm gateway",
+          "call convert",
+          "bulk sim",
+          "illegal gateway"
+        ],
+        "CALL_SPOOFING_VICTIM": [
+          "spoofed cli",
+          "spoofed caller",
+          "fake department call",
+          "ivr call",
+          "telecom spoof",
+          "inbound spoof"
+        ],
+        "OTP_INTERCEPTION": [
+          "call forward active",
+          "conditional forward",
+          "sms divert",
+          "otp grab",
+          "unconditional forwarding"
+        ]
       }
     }
   ]

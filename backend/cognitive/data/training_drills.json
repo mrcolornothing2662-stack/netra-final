@@ -1,0 +1,306 @@
+{
+  "_meta": {
+    "purpose": "Curated training drill missions for NETRA 5.0 Training Simulator. Each drill defines an incident scenario, target typology, default seed, task questions, expected answers, points allocation, and statutory pedagogical debrief lessons under BNSS 2023, BSA 2023, and BNS 2023.",
+    "scoring_model": {
+      "pillars": {
+        "typology": {"max_points": 25, "label": "Modus Operandi & Typology Concordance"},
+        "hidden_links": {"max_points": 25, "label": "Suspect Attribution & Hidden Link Discovery"},
+        "legal_rigor": {"max_points": 25, "label": "Evidentiary Rigor & BSA Section 63 Admissibility"},
+        "action_priority": {"max_points": 25, "label": "Golden Hours Statutory Action Prioritization"}
+      },
+      "max_total": 100,
+      "readiness_tiers": {
+        "MASTER_INVESTIGATOR": {"min_score": 90, "description": "Court-ready chargesheet quality. Exceptional evidentiary rigor and statutory compliance."},
+        "LEAD_CYBER_INVESTIGATOR": {"min_score": 75, "description": "High investigative competency. Solid evidence extraction and procedural execution."},
+        "PROFICIENT_OFFICER": {"min_score": 50, "description": "Operational grasp. Requires strengthening on defense cross-examination and BSA Section 63 rules."},
+        "NOVICE_IN_TRAINING": {"min_score": 0, "description": "Foundational level. Review crime script stages, hidden link discovery, and statutory notice protocols."}
+      }
+    }
+  },
+  "drills": [
+    {
+      "id": "DRILL-01-DIGITAL-ARREST",
+      "title": "Drill 01: Operation Meridian — Digital Arrest Coercion",
+      "typology": "DIGITAL_ARREST",
+      "difficulty": "BEGINNER",
+      "incident_brief": "Complainant Mrs. Sunita Sharma (aged 58, retired professor) received WhatsApp messages claiming to be from the Cyber Crime Branch & CBI stating a parcel containing narcotics and fake passports was registered in her name. The callers forced her into a 4-hour Skype 'digital arrest' video call with cameras on and doors locked, threatening immediate remand unless she transferred 'security verification deposits' to an RBI supervisory clearance account.",
+      "default_seed": 101,
+      "planted_defects": [
+        "Dropped CDR call log row between accused and complainant",
+        "Missing Section 63 BSA certificate from telecom provider for tower dump",
+        "Planted hidden offramp link connecting accused phone with Layer 1 mule account"
+      ],
+      "tasks": [
+        {
+          "task_id": "TASK_TYPOLOGY",
+          "pillar": "typology",
+          "prompt": "Based on the communications and coercive sequence, which cyber-fraud crime script typology is in progress?",
+          "options": [
+            {"id": "DIGITAL_ARREST", "label": "Digital Arrest Extortion (Spoof LE -> Video Isolation -> Extortion)"},
+            {"id": "INVESTMENT_TASK", "label": "Investment & Task Fraud (Bait Profit -> VIP Deposit -> Fee Lockout)"},
+            {"id": "ROMANCE_CRYPTO", "label": "Romance Baiting & Emergency Extortion"},
+            {"id": "LOAN_APP_EXTORTION", "label": "Instant Loan App Harassment & Defamation"}
+          ],
+          "correct_option": "DIGITAL_ARREST",
+          "points": 25,
+          "pedagogical_lesson": "Under I4C Advisory (March 2025) and NITI Aayog guidelines, 'Digital Arrest' involves LE impersonation (BNS 204), video isolation, and coercion under threat of non-bailable arrest (BNS 318(4) & 308). The observed behavioral script aligns with SPOOF_LE_NOTICE -> ISOLATION_VIDEO_CALL -> THREAT_ARREST -> EXTRACTION_TRANSFER."
+        },
+        {
+          "task_id": "TASK_HIDDEN_LINK",
+          "pillar": "hidden_links",
+          "prompt": "Identify the primary Layer-1 mule and uncover the unco-occurring hidden link connecting the handler to the financial offramp:",
+          "options": [
+            {"id": "L1_MULE_TEMPORAL_OFFRAMP", "label": "Handler phone is temporally linked to the Layer-1 mule account receiving the initial victim transfer"},
+            {"id": "DIRECT_CDR_CO_OCCURRENCE", "label": "Handler and offramp account appear together in the same WhatsApp message"},
+            {"id": "NO_HIDDEN_LINK", "label": "No financial or telecommunication links exist between handler and mules"},
+            {"id": "VICTIM_ACCOUNT_MULE", "label": "Victim's personal account is the primary money mule"}
+          ],
+          "correct_option": "L1_MULE_TEMPORAL_OFFRAMP",
+          "points": 25,
+          "pedagogical_lesson": "Professional cybercrime syndicates never co-occur with their offramp mules in a single document or call log. The connection is proven through temporal-financial correlation: victim transfer timing exactly precedes L1 pass-through disbursements."
+        },
+        {
+          "task_id": "TASK_LEGAL_RIGOR",
+          "pillar": "legal_rigor",
+          "prompt": "What critical evidentiary vulnerability must the investigating officer rectify before presenting the CDR evidence in court under Bharatiya Sakshya Adhiniyam (BSA), 2023?",
+          "options": [
+            {"id": "MISSING_BSA_63_CERT", "label": "Procure mandatory Section 63 BSA Hash & Authenticity Certificate from the Telecom Nodal Officer"},
+            {"id": "CONFESSION_RECORDING", "label": "Rely solely on police custody confession without corroborating digital records"},
+            {"id": "NO_DEFECTS_EXIST", "label": "CDR CSV export from internal drive is self-authenticating without certificate"},
+            {"id": "DISCARD_CDR", "label": "Discard all telecom records as electronic records are inadmissible"}
+          ],
+          "correct_option": "MISSING_BSA_63_CERT",
+          "points": 25,
+          "pedagogical_lesson": "Under Section 63 BSA 2023 (substituting erstwhile Section 65B IEA), secondary electronic records (like CDR, IPDR, and server logs) are strictly inadmissible without a contemporaneous certificate signed by the person in lawful control of the device or carrier network."
+        },
+        {
+          "task_id": "TASK_GOLDEN_HOURS",
+          "pillar": "action_priority",
+          "prompt": "Which Golden Hours statutory action must be triggered immediately to prevent downstream dissipation of the extorted ₹2,75,000?",
+          "options": [
+            {"id": "FREEZE_L1_ACCOUNTS_1930", "label": "Issue Notice u/s 94 BNSS & initiate emergency lien freeze on Layer-1 mule accounts via 1930 / NCRP portal"},
+            {"id": "DISPATCH_SUMMONS_POST", "label": "Dispatch a postal summons to the suspect's registered address"},
+            {"id": "WAIT_FOR_BANK_STATEMENT", "label": "Wait 30 days for the quarterly hardcopy bank statement"},
+            {"id": "CLOSE_FILE", "label": "Mark case closed as complainant transferred funds voluntarily"}
+          ],
+          "correct_option": "FREEZE_L1_ACCOUNTS_1930",
+          "points": 25,
+          "pedagogical_lesson": "During the Golden Hours (first 2 to 4 hours), stolen funds move across Layer-1 and Layer-2 accounts with a half-life of under 45 minutes. Emergency lien-marking under Section 94 BNSS via NCRP/1930 prevents crypto/ATM offramping."
+        }
+      ]
+    },
+    {
+      "id": "DRILL-02-INVESTMENT-TASK",
+      "title": "Drill 02: Telegram VIP Task & Prepaid Wallet Fraud",
+      "typology": "INVESTMENT_TASK",
+      "difficulty": "INTERMEDIATE",
+      "incident_brief": "Complainant Mr. Rahul Verma was added to a Telegram group 'Global Wealth Elite Tasks' promising 30% daily return for completing YouTube channel likes and rating tasks. After receiving ₹500 initial reward, he was lured into VIP Level 3 prepaid deposits totaling ₹1,80,000. When attempting withdrawal, the platform demanded ₹60,000 in 'withholding tax compliance' and subsequently deleted the chat group.",
+      "default_seed": 202,
+      "planted_defects": [
+        "Ledger running balance discrepancy in intermediary mule statement",
+        "Dropped CDR records showing incomplete telecom session history",
+        "Dynamic proxy IP in network logs without VPN carrier subpoena"
+      ],
+      "tasks": [
+        {
+          "task_id": "TASK_TYPOLOGY",
+          "pillar": "typology",
+          "prompt": "Which crime script typology characterizes this staged task-reward and tax-lockout pattern?",
+          "options": [
+            {"id": "INVESTMENT_TASK", "label": "Investment & Task App Fraud (Lure Small Profit -> VIP Upsell -> Fee Lockout -> Ghost)"},
+            {"id": "DIGITAL_ARREST", "label": "Digital Arrest Extortion"},
+            {"id": "MULE_OFFRAMP", "label": "Mule Harvesting & Account Takeover"},
+            {"id": "SIM_BOX_FRAUD", "label": "SIM Box International Call Bypassing"}
+          ],
+          "correct_option": "INVESTMENT_TASK",
+          "points": 25,
+          "pedagogical_lesson": "Investment task fraud follows a proven 5-stage behavioral lifecycle: LURE_SMALL_PROFIT -> VIP_UPSELL -> EXTRACTION_LARGE_DEPOSIT -> WITHDRAWAL_BLOCK -> DISPOSAL_GHOST. Chargesheet under Section 318(4) BNS and Section 66D IT Act."
+        },
+        {
+          "task_id": "TASK_HIDDEN_LINK",
+          "pillar": "hidden_links",
+          "prompt": "How are the multiple Layer-1 and Layer-2 intermediary accounts connected in the money-flow ledger?",
+          "options": [
+            {"id": "RAPID_PASS_THROUGH_CASCADE", "label": "Rapid pass-through: Funds received from victim are split and forwarded to L2 accounts within minutes"},
+            {"id": "LONG_TERM_FD", "label": "Funds are parked as long-term fixed deposits in the victim's name"},
+            {"id": "DIRECT_CASH_HANDOVER", "label": "Complainant handed over physical cash to the Telegram admin"},
+            {"id": "NO_FUNDS_MOVED", "label": "No financial transactions occurred in the case"}
+          ],
+          "correct_option": "RAPID_PASS_THROUGH_CASCADE",
+          "points": 25,
+          "pedagogical_lesson": "The Contradiction and Anomaly engines detect near-zero retention velocity: total credits approximately equal total debits within a narrow time window, typical of mule pass-through accounts."
+        },
+        {
+          "task_id": "TASK_LEGAL_RIGOR",
+          "pillar": "legal_rigor",
+          "prompt": "In cross-examination, the defense argues the accused mule account holder is a legitimate e-commerce vendor who received routine commercial payments. How should the prosecution counter this defense under Section 193 BNSS?",
+          "options": [
+            {"id": "PROOF_OF_MENS_REA_OR_SESSION_IP", "label": "Subpoena bank session IPDR, device MAC, and prove immediate offramping to crypto without commercial invoices"},
+            {"id": "CONCEDE_DEFENCE", "label": "Accept the commercial defense without verifying invoices or GST filings"},
+            {"id": "ARREST_WITHOUT_EVIDENCE", "label": "Claim commercial intent is irrelevant under criminal law"},
+            {"id": "DISMISS_CASE", "label": "Withdraw the chargesheet immediately"}
+          ],
+          "correct_option": "PROOF_OF_MENS_REA_OR_SESSION_IP",
+          "points": 25,
+          "pedagogical_lesson": "Under Defence Bot stress-testing, the 'legitimate vendor' defense fails when prosecution proves the absence of GST/invoices, instant pass-through velocity (<15 min), and device login session IPDR tracing back to syndicate infrastructure."
+        },
+        {
+          "task_id": "TASK_GOLDEN_HOURS",
+          "pillar": "action_priority",
+          "prompt": "What immediate investigative step should be taken regarding the Telegram group and hosting infrastructure?",
+          "options": [
+            {"id": "SUBPOENA_TELEGRAM_AND_FREEZE_GATEWAY", "label": "Serve Section 94 BNSS preservation notice to Telegram for admin registration IP/phone and freeze payment aggregator VPA"},
+            {"id": "POST_IN_GROUP", "label": "Send a warning message in the Telegram group asking the fraudster to surrender"},
+            {"id": "DELETE_APP", "label": "Instruct victim to uninstall Telegram and reset phone to factory settings"},
+            {"id": "NO_ACTION", "label": "Take no action as foreign platforms never respond"}
+          ],
+          "correct_option": "SUBPOENA_TELEGRAM_AND_FREEZE_GATEWAY",
+          "points": 25,
+          "pedagogical_lesson": "Immediate preservation notices under Section 94 BNSS / Section 91 CrPC compel intermediaries to preserve volatile connection logs and payment gateway escrow balances before dissipation."
+        }
+      ]
+    },
+    {
+      "id": "DRILL-03-SHADOW-MULE-DEFENCE",
+      "title": "Drill 03: Shadow Mule Offramping & Mens Rea Defence",
+      "typology": "MULE_OFFRAMP",
+      "difficulty": "ADVANCED",
+      "incident_brief": "Investigation into a ₹12,00,000 corporate phishing heist traced ₹3,50,000 into the bank account of Rohan Sharma (21, college student). Rohan claims his netbanking credentials and debit card were borrowed by an acquaintance for 'freelance marketing commissions' without his knowledge of illicit activity. The prosecution seeks to charge Rohan as co-conspirator under Section 318(4) and Section 61(2) BNS.",
+      "default_seed": 303,
+      "planted_defects": [
+        "Absence of direct communication between Rohan and the phishing victim",
+        "ATM cash withdrawal captured on CCTV showing a different individual wearing helmet",
+        "Missing Section 105 BNSS seizure memo for mobile phone"
+      ],
+      "tasks": [
+        {
+          "task_id": "TASK_TYPOLOGY",
+          "pillar": "typology",
+          "prompt": "What typology and role classification is substantiated by the evidentiary trace for Rohan Sharma?",
+          "options": [
+            {"id": "PASS_THROUGH_MULE", "label": "Mule Harvesting: Layer-1 pass-through account holder with potential lack of direct criminal mens rea"},
+            {"id": "KINGPIN_OPERATOR", "label": "Kingpin Mastermind: Architect of the entire phishing and malware operation"},
+            {"id": "VICTIM_COMPLAINANT", "label": "Complainant seeking reimbursement"},
+            {"id": "TELECOM_CARRIER", "label": "Telecommunications service provider employee"}
+          ],
+          "correct_option": "PASS_THROUGH_MULE",
+          "points": 25,
+          "pedagogical_lesson": "Heuer's Analysis of Competing Hypotheses (ACH) and NETRA Hypothesis Board evaluate evidentiary diagnosticity: pass-through transaction volume without retention strongly supports the Mule role over Mastermind/Kingpin."
+        },
+        {
+          "task_id": "TASK_HIDDEN_LINK",
+          "pillar": "hidden_links",
+          "prompt": "How can the prosecution identify the actual syndicate controller who operated Rohan's account?",
+          "options": [
+            {"id": "ATM_CCTV_AND_SESSION_IP", "label": "Correlate Netbanking login session IPDR + Device IMEI + ATM CCTV timestamps during the cash withdrawal window"},
+            {"id": "ASSUME_ROHAN_IS_GUILTY", "label": "Assume Rohan was wearing the helmet without seeking corroborating proof"},
+            {"id": "DISMISS_CCTV", "label": "Disregard CCTV footage as it is not paper evidence"},
+            {"id": "CLOSE_INVESTIGATION", "label": "Stop investigation at Rohan since the money hit his account"}
+          ],
+          "correct_option": "ATM_CCTV_AND_SESSION_IP",
+          "points": 25,
+          "pedagogical_lesson": "Section 193 BNSS requires objective corroboration. Triangulating bank session IPDR, device MAC/IMEI, and ATM CCTV footage breaks the 'borrowed card' defense or unmasks the true syndicate runner."
+        },
+        {
+          "task_id": "TASK_LEGAL_RIGOR",
+          "pillar": "legal_rigor",
+          "prompt": "Defence Bot raises a serious challenge: 'Prosecution has zero proof of mens rea under Section 318(4) BNS as Rohan never communicated with the complainant.' What is the appropriate legal handling?",
+          "options": [
+            {"id": "CORROBORATE_BENEFIT_OR_AMEND_CHARGE", "label": "Investigate commission retention / willful blindness; if purely compromised, charge actual operators and cite Rohan as material witness or under relevant negligence provisions"},
+            {"id": "FABRICATE_CHATS", "label": "Fabricate chat messages between Rohan and the complainant"},
+            {"id": "IGNORE_MENS_REA", "label": "Argue mens rea is never required for financial fraud under BNS"},
+            {"id": "REFUSE_BAIL_WITHOUT_CHARGE", "label": "Detain Rohan indefinitely without filing a chargesheet within 60/90 days"}
+          ],
+          "correct_option": "CORROBORATE_BENEFIT_OR_AMEND_CHARGE",
+          "points": 25,
+          "pedagogical_lesson": "Supreme Court jurisprudence on cheating (BNS 318(4) / IPC 420) mandates proof of fraudulent intent from inception. Charging a victim of account compromise without proving mens rea leads to trial acquittal and judicial censure."
+        },
+        {
+          "task_id": "TASK_GOLDEN_HOURS",
+          "pillar": "action_priority",
+          "prompt": "Which statutory step is vital to preserve the physical and digital chain of custody of Rohan's mobile device?",
+          "options": [
+            {"id": "SECTION_105_BNSS_SEIZURE_PANCHNAMA", "label": "Execute audio-video recorded seizure memo under Section 105 BNSS with independent panch witnesses and SHA-256 hash preservation"},
+            {"id": "INFORMAL_PHONE_CHECK", "label": "Browse through the phone informally without writing a panchnama"},
+            {"id": "HAND_PHONE_BACK", "label": "Return the phone immediately without creating a forensic bit-stream image"},
+            {"id": "FACTORY_RESET", "label": "Perform a factory reset to remove malicious apps"}
+          ],
+          "correct_option": "SECTION_105_BNSS_SEIZURE_PANCHNAMA",
+          "points": 25,
+          "pedagogical_lesson": "Section 105 BNSS mandates audio-video electronic recording of search and seizure. Failure to record panchnama or compute cryptographic hashes at seizure violates Section 63 BSA chain-of-custody requirements."
+        }
+      ]
+    },
+    {
+      "id": "DRILL-04-PREDATORY-LOAN-BSA",
+      "title": "Drill 04: Instant Loan Harassment & Section 63 BSA Safeguards",
+      "typology": "LOAN_APP_EXTORTION",
+      "difficulty": "ADVANCED",
+      "incident_brief": "Complainant Ms. Priya Nair installed 'FastCredit Cash Loan' APK from a third-party website. The app disbursed ₹6,200, deducted ₹3,800 processing fee, and 6 days later syndicate agents began sending morphed defamatory pictures to her family contacts and employer via VoIP WhatsApp numbers (+1 and +84 country codes), demanding ₹28,000.",
+      "default_seed": 404,
+      "planted_defects": [
+        "Uncertified WhatsApp screenshot exports without original device forensic extraction",
+        "Third-party APK file not submitted to forensic laboratory",
+        "Payment gateway merchant escrow accounts remaining un-frozen"
+      ],
+      "tasks": [
+        {
+          "task_id": "TASK_TYPOLOGY",
+          "pillar": "typology",
+          "prompt": "Identify the primary criminal typology and key statutory violations evidenced in this case:",
+          "options": [
+            {"id": "LOAN_APP_EXTORTION_STATUTE", "label": "Predatory Loan Extortion: Violations of Section 308(2) BNS (Extortion), Section 351(2) BNS (Criminal Intimidation), and Section 67 IT Act"},
+            {"id": "SIM_BOX_BYPASS", "label": "Telecom SIM Box Gateway Injection"},
+            {"id": "ORDINARY_CIVIL_DEBT", "label": "Pure civil contract dispute with no criminal elements"},
+            {"id": "CREDIT_CARD_THEFT", "label": "Physical theft of magnetic stripe credit card"}
+          ],
+          "correct_option": "LOAN_APP_EXTORTION_STATUTE",
+          "points": 25,
+          "pedagogical_lesson": "Loan app extortion combines usury, data theft (Section 43/66 IT Act), criminal intimidation (Section 351 BNS), and transmission of obscene/morphed media (Section 67 IT Act). It is a recognized syndicated organized crime pattern under BNS 111."
+        },
+        {
+          "task_id": "TASK_HIDDEN_LINK",
+          "pillar": "hidden_links",
+          "prompt": "How can the IO trace the domestic money trail if the extortion calls originated from overseas virtual numbers?",
+          "options": [
+            {"id": "FOLLOW_PAYMENT_GATEWAY_ESCROW", "label": "Trace the payment gateway MID and banking nodal accounts where the victim paid the extortion money domestically"},
+            {"id": "TRAVEL_OVERSEAS_IMMEDIATELY", "label": "Fly to the foreign country without verifying payment channels"},
+            {"id": "BLOCK_VICTIM_PHONE", "label": "Tell the victim to change her phone number and abandon the investigation"},
+            {"id": "IGNORE_DOMESTIC_TRAIL", "label": "Assume foreign numbers mean domestic banks cannot be questioned"}
+          ],
+          "correct_option": "FOLLOW_PAYMENT_GATEWAY_ESCROW",
+          "points": 25,
+          "pedagogical_lesson": "Virtual numbers (VoIP) often mask offshore operators, but domestic banking and UPI rails require RBI-regulated payment aggregators. Serving Section 94 BNSS notices on the Payment Gateway reveals the settlement bank account."
+        },
+        {
+          "task_id": "TASK_LEGAL_RIGOR",
+          "pillar": "legal_rigor",
+          "prompt": "The complainant provided printed screenshots of WhatsApp chats. Under Section 63 BSA, 2023, why are printed screenshots alone legally vulnerable in a criminal trial?",
+          "options": [
+            {"id": "SECONDARY_RECORD_REQUIRES_DEVICE_EXTRACTION", "label": "Printed screenshots lack cryptographic metadata; Section 63 BSA mandates a certificate and certified forensic extraction of the source handset"},
+            {"id": "SCREENSHOTS_NEVER_ALLOWED", "label": "Screenshots are illegal to produce in any court of law"},
+            {"id": "PRINTED_SCREENSHOTS_SUFFICIENT", "label": "Any printout is automatically conclusive proof without verification"},
+            {"id": "JUDGE_PREFERS_HANDWRITING", "label": "Courts only accept handwritten transcripts"}
+          ],
+          "correct_option": "SECONDARY_RECORD_REQUIRES_DEVICE_EXTRACTION",
+          "points": 25,
+          "pedagogical_lesson": "In Arjun Panditrao (2020) and codified in Section 63 BSA 2023, secondary electronic printouts without device forensic imaging or hash certification can be easily fabricated or manipulated and are prone to defense exclusion."
+        },
+        {
+          "task_id": "TASK_GOLDEN_HOURS",
+          "pillar": "action_priority",
+          "prompt": "What is the critical immediate action to stop further harassment and protect other citizens from the predatory APK?",
+          "options": [
+            {"id": "SECTION_69A_IT_ACT_AND_GATEWAY_FREEZE", "label": "Emergency notice to MeitY under Section 69A IT Act to block APK host domain and freeze the aggregator payment gateway MID"},
+            {"id": "FILE_WRIT_PETITION", "label": "Advise victim to file a Supreme Court civil writ petition"},
+            {"id": "PAY_EXTORTIONIST", "label": "Recommend the complainant pay the ₹28,000 to avoid embarrassment"},
+            {"id": "CALL_EXTORTIONIST", "label": "Engage in informal phone arguments with the foreign VoIP caller"}
+          ],
+          "correct_option": "SECTION_69A_IT_ACT_AND_GATEWAY_FREEZE",
+          "points": 25,
+          "pedagogical_lesson": "Emergency URL/domain takedown under Section 69A IT Act combined with payment aggregator freeze isolates the infrastructure and prevents ongoing contact list harvesting and financial extortion."
+        }
+      ]
+    }
+  ]
+}

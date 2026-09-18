@@ -343,9 +343,9 @@ def _decode_bio(
 
     if current_type:
         val = text[current_start:current_end].strip()
-        if val:
+        if val and len(val) >= 2:
             predictions.append(MLPrediction(
-                entity_type=current_type,
+                entity_type=_normalize_label(current_type),
                 raw_value=val,
                 canonical_value=val,
                 span_start=current_start,
@@ -378,7 +378,22 @@ class _FallbackCRF:
                     sent_tags.append("B-UPI")
                 elif has_digit and length == 10:
                     sent_tags.append("B-PHONE")
-                elif istitle and word not in ("the", "and", "for", "with", "from", "to", "in", "on", "at", "by"):
+                elif (
+                    istitle
+                    and not has_digit
+                    and length >= 3
+                    and word not in {
+                        "the", "and", "for", "with", "from", "to", "in", "on", "at", "by",
+                        "received", "sent", "confirmed", "conversation", "participants",
+                        "participant", "communication", "network", "analysis", "message",
+                        "messages", "transaction", "transactions", "evidence", "document",
+                        "summary", "details", "status", "unknown", "system", "bank",
+                        "field", "value", "platform", "android", "observed", "record",
+                        "records", "timestamp", "activity", "outgoing", "incoming",
+                        "application", "extraction", "integrity", "method", "custody",
+                        "examiner", "tooling", "device", "reference",
+                    }
+                ):
                     sent_tags.append("B-PERSON")
                 elif isupper and length >= 3 and not has_digit:
                     sent_tags.append("B-ORG")

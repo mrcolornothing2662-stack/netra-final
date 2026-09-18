@@ -1,0 +1,37 @@
+{
+  "trace_propagation": {
+    "auto_generation_verified": true,
+    "custom_echo_verified": true,
+    "auth_pipeline_verified": true
+  },
+  "audit_chain": {
+    "global_entries_verified": 1472,
+    "verification_ms": 27.66,
+    "status": "VERIFIED",
+    "tamper_detection_active": true
+  },
+  "concurrent_audit_appends": {
+    "concurrent_writes": 20,
+    "duration_seconds": 0.062,
+    "advisory_locking_verified": true,
+    "post_write_chain_intact": true
+  },
+  "health_observability": {
+    "health_check_ms": 1.65,
+    "postgresql_status": "connected",
+    "chromadb_status": "active",
+    "disk_free_gb": 250.48,
+    "registered_ml_models": [
+      "crf",
+      "hingbert",
+      "cyberdrishtilm"
+    ],
+    "integrations_monitored": [
+      "ncrp_1930",
+      "dot_cms"
+    ]
+  },
+  "total_duration_seconds": 3.02,
+  "checkpoints_passed": 13,
+  "total_checkpoints": 13
+}

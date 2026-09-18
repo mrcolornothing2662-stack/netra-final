@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Block, tabSwap } from "../../app/transitions";
@@ -14,7 +14,9 @@ import { NetworkTab } from "./tabs/NetworkTab";
 import { TimelineTab } from "./tabs/TimelineTab";
 import { AnalysisTab } from "./tabs/AnalysisTab";
 import { CognitiveTab } from "./tabs/CognitiveTab";
+import { AgentTab } from "./tabs/AgentTab";
 import { ReportTab } from "./tabs/ReportTab";
+import { CaseEditModal } from "../../components/case/CaseEditModal";
 import { caseById } from "../../data/corpus";
 import { useFlipIn } from "../../lib/flip";
 import { useLiveStore } from "../../state/useLiveStore";
@@ -97,8 +99,10 @@ export function CaseScreen() {
 
   const showDemoBadge = isDemo || c.source_type === "SYNTHETIC_DEMO";
 
-  const VALID_TABS: CaseTabId[] = ["overview", "notes", "evidence", "entities", "network", "timeline", "analysis", "cognitive", "report"];
+  const VALID_TABS: CaseTabId[] = ["overview", "notes", "evidence", "entities", "network", "timeline", "analysis", "cognitive", "agent", "report"];
   const activeTab: CaseTabId = VALID_TABS.includes(tab as CaseTabId) ? (tab as CaseTabId) : "overview";
+
+  const [showEdit, setShowEdit] = useState(false);
 
   return (
     <div className="page">
@@ -124,6 +128,15 @@ export function CaseScreen() {
         <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", flexWrap: "wrap" }}>
           <h1 ref={titleRef} className={`t-title-1 ${s.caseTitle}`} style={{ margin: 0 }}>{c.name}</h1>
           {showDemoBadge && <DemoBadge />}
+          {!isDemo && (
+            <button
+              onClick={() => setShowEdit(true)}
+              style={{ background: "none", border: "1px solid var(--line)", borderRadius: "var(--radius-sm)", padding: "4px 10px", color: "var(--text-muted)", cursor: "pointer", font: "var(--type-mono-xs)", letterSpacing: "0.06em" }}
+              title="Edit case details"
+            >
+              ✎ EDIT
+            </button>
+          )}
         </div>
         <div className={s.status}>
           <span className={s.dot} />
@@ -152,8 +165,26 @@ export function CaseScreen() {
         {activeTab === "timeline" && <TimelineTab caseId={c.id} onOpenEvidence={() => navigate(`/investigations/${c.id}/evidence`)} />}
         {activeTab === "analysis" && <AnalysisTab caseId={c.id} onOpenEvidence={() => navigate(`/investigations/${c.id}/evidence`)} />}
         {activeTab === "cognitive" && <CognitiveTab caseId={c.id} />}
+        {activeTab === "agent" && <AgentTab caseId={c.id} />}
         {activeTab === "report" && <ReportTab caseData={c} />}
       </motion.div>
+
+      {showEdit && (
+        <CaseEditModal
+          caseId={c.id}
+          current={{
+            title: c.name,
+            description: (c as any).description || (c as any).brief || "",
+            status: c.status,
+            priority: c.priority || undefined,
+            crime_type: (c as any).crime_type || c.domain,
+            fir_number: (c as any).fir_number || "",
+            police_station: (c as any).police_station || "",
+          }}
+          onClose={() => setShowEdit(false)}
+          onSaved={() => fetchCaseDetails(c.id)}
+        />
+      )}
     </div>
   );
 }

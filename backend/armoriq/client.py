@@ -47,6 +47,19 @@ except ImportError:
 
 # ── Local stub (development / demo without a live ArmorIQ account) ────────────
 
+class StubIntentMismatch(Exception):
+    """Raised by the local stub when an action was not declared in the plan.
+
+    This must be a *dedicated* type. Returning base `Exception` from
+    `get_intent_mismatch_exception()` previously made the agent treat every
+    tool failure as a fabricated "ArmorIQ governance block".
+    """
+
+
+class StubPolicyBlocked(Exception):
+    """Raised by the local stub when a declared action is policy-blocked."""
+
+
 class _LocalStubClient:
     """
     Minimal local stub that mimics ArmorIQ's authorization model without
@@ -124,9 +137,7 @@ class _LocalStubClient:
 
         if action not in declared:
             # Action not in declared plan → blocked, exactly like ArmorIQ
-            class _IntentMismatch(Exception):
-                pass
-            raise _IntentMismatch(
+            raise StubIntentMismatch(
                 f"IntentMismatchException: action '{action}' on MCP '{mcp}' "
                 f"was not declared in the authorization plan. "
                 f"Declared actions: {list(declared.keys())}"
@@ -168,12 +179,31 @@ def get_armoriq_client():
         return _LocalStubClient()
 
 
-def get_intent_mismatch_exception():
-    """Return the real IntentMismatchException class or the stub version."""
+def get_intent_mismatch_exception(client=None):
+    """Return the exception class raised when an action is outside the plan.
+
+    This must match the *active* client. When the local stub is in use it raises
+    ``StubIntentMismatch``; when the real SDK client is active it raises
+    ArmorIQ's ``IntentMismatchException``. Never return the base ``Exception`` —
+    that would swallow ordinary tool errors and mislabel them as governance
+    blocks.
+    """
+    active = client if client is not None else armoriq()
+    if isinstance(active, _LocalStubClient):
+        return StubIntentMismatch
     if _SDK_AVAILABLE and IntentMismatchException is not None:
         return IntentMismatchException
-    # Return base Exception; the stub raises a local subclass of Exception
-    return Exception
+    return StubIntentMismatch
+
+
+def get_policy_blocked_exception(client=None):
+    """Return the exception class raised when a declared action is policy-blocked."""
+    active = client if client is not None else armoriq()
+    if isinstance(active, _LocalStubClient):
+        return StubPolicyBlocked
+    if _SDK_AVAILABLE and PolicyBlockedException is not None:
+        return PolicyBlockedException
+    return StubPolicyBlocked
 
 
 # ── Singleton ────────────────────────────────────────────────────────────────

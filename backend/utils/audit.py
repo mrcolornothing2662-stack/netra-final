@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple, Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import AuditLog
@@ -41,9 +41,16 @@ async def append_audit(
     Returns:
         The created AuditLog instance (not yet committed — caller commits).
     """
+    # Serialize chain appends. Without this, concurrent transactions can commit
+    # hash-links out of id order and the recomputed chain verify diverges (the
+    # failure mode behind historical entry #754). PostgreSQL only; released at
+    # transaction end. SQLite has a single writer and needs no lock.
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('cyberdrishti:audit-chain'))"))
+
     # Fetch the most recent hash in the chain
     prev = await db.execute(
-        select(AuditLog.entry_hash).order_by(AuditLog.id.desc()).limit(1)
+        select(AuditLog.entry_hash).order_by(AuditLog.id.desc()).limit(1).with_for_update()
     )
     prev_hash = prev.scalar_one_or_none() or "0" * 64
 
@@ -100,25 +107,37 @@ def verify_chain(logs: list[AuditLog]) -> tuple[bool, str]:
     if not logs:
         return True, "Chain is empty"
 
+    def _canonical_ts(dt: datetime | None) -> str:
+        if dt is None:
+            return ""
+        dt = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+        return dt.isoformat()
+
     prev_hash = "0" * 64
     for idx, entry in enumerate(logs):
+        if entry.action == "GENESIS":
+            prev_hash = entry.entry_hash
+            continue
         if entry.prev_hash != prev_hash and idx != 0:
             return False, f"Broken link at sequence #{idx}: prev_hash mismatch ({entry.prev_hash} != {prev_hash})"
 
-        # Re-compute hash
+        # Re-compute hash over the exact canonical payload that append_audit
+        # signed, and actually compare it. (Previously the computed value was
+        # discarded, so tampering was never detected.)
         entry_data = json.dumps(
             {
                 "action":      entry.action,
                 "user_id":     str(entry.user_id) if entry.user_id else None,
                 "resource_id": str(entry.resource_id) if entry.resource_id else None,
                 "details":     entry.details_json or {},
-                "timestamp":   entry.event_timestamp.isoformat() if entry.event_timestamp else "",
+                "timestamp":   _canonical_ts(entry.event_timestamp),
             },
             sort_keys=True,
         )
-        expected_hash = hashlib.sha256((entry.prev_hash + entry_data).encode()).hexdigest()
+        expected_hash = hashlib.sha256((prev_hash + entry_data).encode()).hexdigest()
+        if expected_hash != entry.entry_hash:
+            return False, f"Hash mismatch at entry #{entry.id}"
 
-        # In testing/demo mode where timestamps are exact, entry_hash matches
         prev_hash = entry.entry_hash
 
     return True, f"Verified {len(logs)} audit entries successfully"

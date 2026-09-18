@@ -1,10 +1,11 @@
 {
   "_meta": {
-    "purpose": "Crime typology playbooks for synthetic case generation. Stage sequences follow publicly documented Indian cyber-fraud patterns (I4C 'Digital Arrest' advisory, Mar 2025; NITI Aayog 'Digital Arrest: The Modern-Day Cyber Scam', Apr 2025; NCRP-reported investment/task-fraud pattern). Templates are Hinglish with {placeholders} filled from pools.json. Nothing here is case data — it is playbook structure.",
-    "ground_truth_contract": "Every generated case ships with: entity values, money-flow edges, planted hidden links (pairs that never co-occur in one event), planted contradictions, and the typology label."
+    "purpose": "Crime typology playbooks for synthetic case generation and training simulator drills. Stage sequences follow publicly documented Indian cyber-fraud patterns (I4C 'Digital Arrest' advisory, Mar 2025; NITI Aayog 'Digital Arrest: The Modern-Day Cyber Scam', Apr 2025; NCRP-reported investment/task-fraud and mule syndicates). Templates are Hinglish with {placeholders} filled from pools.json. DPDP 2023 compliant synthetic data.",
+    "ground_truth_contract": "Every generated case ships with: entity values, money-flow edges, planted hidden links (pairs that never co-occur in one event), planted contradictions, statutory defects, and the typology label."
   },
   "typologies": {
     "DIGITAL_ARREST": {
+      "name": "Digital Arrest Extortion",
       "description": "Fake law-enforcement 'digital arrest' extortion (I4C advisory pattern): spoof official contact, isolation via video call, coerced 'verification' transfer to a 'clearance' account, disposal.",
       "stages": ["SPOOF_LE_NOTICE", "ISOLATION_VIDEO_CALL", "THREAT_ARREST", "EXTRACTION_TRANSFER", "DISPOSAL_BLOCK"],
       "money_flow": {"l1_mules": 2, "l2_per_l1": 2, "offramps": 1},
@@ -15,9 +16,13 @@
         "OTP {otp} aa raha hai, bol do turant",
         "kaam ho gaya, number block kar do"
       ],
-      "decoy_ratio": 0.25
+      "decoy_ratio": 0.25,
+      "statutory_provisions": ["Section 318(4) BNS", "Section 204 BNS", "Section 66D IT Act"],
+      "defence_challenges": ["LACK_OF_MENS_REA_MULE", "CELL_TOWER_RADIUS_AMBIGUITY", "ABSENCE_SECTION_63_BSA_CERTIFICATE"],
+      "golden_hours_actions": ["FREEZE_L1_MULE_ACCOUNTS", "NOTICE_94_BNSS_BANK_SESSION_IPDR", "PRESERVE_CDR_TOWER_DUMP"]
     },
     "INVESTMENT_TASK": {
+      "name": "Investment & Task App Fraud",
       "description": "Trading/task-app fraud (NCRP-reported dominant category): small guaranteed payouts first, then larger 'VIP' deposits, then withdrawal blocked with 'tax' demands.",
       "stages": ["LURE_SMALL_PROFIT", "VIP_UPSELL", "EXTRACTION_LARGE_DEPOSIT", "WITHDRAWAL_BLOCK", "DISPOSAL_GHOST"],
       "money_flow": {"l1_mules": 3, "l2_per_l1": 1, "offramps": 2},
@@ -28,7 +33,61 @@
         "id block ho gaya hai, agent se baat karo",
         "aapka account permanently closed hai"
       ],
-      "decoy_ratio": 0.15
+      "decoy_ratio": 0.15,
+      "statutory_provisions": ["Section 318(4) BNS", "Section 66D IT Act", "Section 111 BNS"],
+      "defence_challenges": ["COMMERCIAL_DISPUTE_DEFENCE", "DYNAMIC_IP_NAT_AMBIGUITY", "ABSENCE_DEVICE_EXTRACTION_PANCHNAMA"],
+      "golden_hours_actions": ["FREEZE_L1_MULE_ACCOUNTS", "LIEN_MARK_OFFRAMP_CRYPTO", "SUBPOENA_TELEGRAM_GROUP_ADMIN"]
+    },
+    "MULE_OFFRAMP": {
+      "name": "Mule Harvesting & Layered Offramping",
+      "description": "Systematic recruitment of commercial and student mule bank accounts, high-velocity pass-through transfers, and cashout via ATM/crypto off-ramps.",
+      "stages": ["MULE_RECRUITMENT", "CREDENTIAL_CAPTURE", "LAYERED_TRANSFERS", "CASH_OUT_ATM_CRYPTO", "ABANDONMENT"],
+      "money_flow": {"l1_mules": 3, "l2_per_l1": 2, "offramps": 2},
+      "chat_templates": [
+        "student account per month 25000 commission par rent par chahiye",
+        "netbanking kit aur ATM card handover karo verification ke liye",
+        "account mein 350000 aaya hai, turant next account transfer karo",
+        "ATM se cash nikal kar crypto merchant ko cash deposit karo",
+        "SIM card tod kar phenk do, account freeze ho chuka hai"
+      ],
+      "decoy_ratio": 0.20,
+      "statutory_provisions": ["Section 317(2) BNS", "Section 318(4) BNS", "Section 66C IT Act"],
+      "defence_challenges": ["INNOCENT_ACCOUNT_COMPROMISE", "ABSENCE_COMMUNICATION_WITH_VICTIM", "PASS_THROUGH_WITHOUT_BENEFIT"],
+      "golden_hours_actions": ["FREEZE_L1_MULE_ACCOUNTS", "ATM_CCTV_FOOTAGE_PRESERVATION", "NOTICE_94_BNSS_DEVICE_IMEI"]
+    },
+    "LOAN_APP_EXTORTION": {
+      "name": "Instant Loan Harassment & Extortion",
+      "description": "Predatory instant micro-lending apps harvesting contact lists, disbursing partial amounts, demanding usurious repayment, and threatening public defamation.",
+      "stages": ["APP_INSTALL_PERMISSION", "MICRO_DISBURSEMENT", "USURIOUS_DEMAND", "CONTACT_DEFAMATION", "SUICIDE_THREAT_RECOVERY"],
+      "money_flow": {"l1_mules": 2, "l2_per_l1": 1, "offramps": 1},
+      "chat_templates": [
+        "instant 10000 loan approved, download APK and allow contacts permission",
+        "disbursed 6200 in your account after processing deduction",
+        "repay 14500 within 7 days or your family contacts will be shared morphed photo",
+        "fraudster defaulter notice forwarded to your entire phonebook contacts",
+        "final warning police complaint lodged pay remaining recovery fee now"
+      ],
+      "decoy_ratio": 0.15,
+      "statutory_provisions": ["Section 308(2) BNS", "Section 351(2) BNS", "Section 67 IT Act"],
+      "defence_challenges": ["THIRD_PARTY_SDK_ATTRIBUTION", "ABSENCE_SECTION_63_BSA_ON_SMS", "UNVERIFIED_WHATSAPP_NUMBER"],
+      "golden_hours_actions": ["BLOCK_APK_HOSTING_DOMAIN", "FREEZE_PAYMENT_GATEWAY_ESCROW", "NOTICE_94_BNSS_CLOUD_HOST"]
+    },
+    "ROMANCE_CRYPTO": {
+      "name": "Romance Baiting & Crypto Laundering",
+      "description": "Social media grooming under romantic pretenses, fabrication of personal or medical emergencies, and coercive redirection of funds into crypto asset off-ramps.",
+      "stages": ["INITIAL_CONTACT", "GROOMING_AFFECTION", "EMERGENCY_FABRICATION", "URGENT_FUND_REQUEST", "DISAPPEARANCE"],
+      "money_flow": {"l1_mules": 2, "l2_per_l1": 1, "offramps": 2},
+      "chat_templates": [
+        "hi dear nice to meet you on Instagram, let us talk on WhatsApp",
+        "i feel a deep connection with you, we should plan to meet soon",
+        "my customs clearance at airport is stuck, they are asking urgent clearance duty fee",
+        "please transfer {amount} to this agent {upi} account immediately, i will return double tomorrow",
+        "sorry my phone is being seized by customs, will contact later"
+      ],
+      "decoy_ratio": 0.20,
+      "statutory_provisions": ["Section 318(4) BNS", "Section 66D IT Act", "Section 316(2) BNS"],
+      "defence_challenges": ["GIFT_CONSENT_DEFENCE", "UNVERIFIED_VOIP_CALLER_ID", "LACK_OF_DIRECT_CRYPTO_TRACE"],
+      "golden_hours_actions": ["FREEZE_L1_MULE_ACCOUNTS", "VASP_WALLET_FREEZE_NOTICE", "PRESERVE_INSTAGRAM_METADATA"]
     }
   }
 }

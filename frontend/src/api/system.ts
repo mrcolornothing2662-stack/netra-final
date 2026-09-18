@@ -52,11 +52,24 @@ export interface OfficerCreatePayload {
   role?: string;
 }
 
+export interface IntegrationItem {
+  name: string;
+  status: string;
+  badge: string;
+  endpoint: string;
+  sync_mode: string;
+  description: string;
+  models?: Record<string, boolean>;
+}
+
+export type IntegrationsResponse = Record<string, IntegrationItem>;
+
 export const systemApi = {
   health: () => apiClient.get<SystemHealth>("/health"),
   verifyAudit: () => apiClient.get<AuditVerification>("/audit/verify"),
   verifyCaseAudit: (caseId: string) =>
     apiClient.get<AuditVerification>(`/audit/verify/${encodeURIComponent(caseId)}`),
+  integrations: () => apiClient.get<IntegrationsResponse>("/settings/integrations"),
 };
 
 export const officersApi = {

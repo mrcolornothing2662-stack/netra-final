@@ -1,0 +1,44 @@
+{
+  "docker_compose": {
+    "services": [
+      "db",
+      "redis",
+      "adminer",
+      "backend",
+      "frontend"
+    ],
+    "valid_yaml": true,
+    "db_healthcheck": true,
+    "frontend_reverse_proxy_mapped": true
+  },
+  "nginx_reverse_proxy": {
+    "multi_stage_dockerfile": true,
+    "max_body_size_100m": true,
+    "sse_buffering_off": true,
+    "spa_routing_fallback": true,
+    "gzip_enabled": true
+  },
+  "production_boot_gate": {
+    "default_key_rejected": true,
+    "short_key_rejected": true,
+    "sqlite_in_prod_rejected": true,
+    "weak_admin_password_rejected": true,
+    "secure_config_permitted": true
+  },
+  "static_bundle": {
+    "index_html_present": true,
+    "js_chunks": 5,
+    "css_chunks": 1,
+    "total_bundle_bytes": 2272178
+  },
+  "openapi_spec": {
+    "total_paths": 81,
+    "critical_surfaces_verified": 10,
+    "security_schemes": [
+      "OAuth2PasswordBearer"
+    ]
+  },
+  "total_duration_seconds": 0.14,
+  "checkpoints_passed": 33,
+  "total_checkpoints": 33
+}

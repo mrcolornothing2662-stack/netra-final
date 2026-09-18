@@ -19,7 +19,7 @@ function normalizeKind(entityType: string): EntityKind {
   if (upper === "BANK") return "BANK";
   if (upper === "AMOUNT") return "AMOUNT";
   if (upper === "PHONE") return "PHONE";
-  if (upper === "DEVICE" || upper === "IMEI" || upper === "TOWER") return "DEVICE";
+  if (upper === "DEVICE" || upper === "IMEI" || upper === "TOWER" || upper === "CELL_TOWER") return "DEVICE";
   if (upper === "ACCOUNT") return "ACCOUNT";
   if (upper === "ORG") return "ORG";
   if (upper === "IP") return "IP";
@@ -82,12 +82,28 @@ export function adaptGraphData(
   const connections: Connection[] = [];
   normalEdges.forEach((e, idx) => {
     if (nodeSet.has(e.source) && nodeSet.has(e.target)) {
+      const relType = e.relationship_type || undefined;
+      const epistemic = e.epistemic_status || "OBSERVED";
+      const evidenceRefs = e.evidence_refs || [];
+      const provNote = evidenceRefs.length ? ` · ${evidenceRefs.length} evidence ref(s)` : "";
       connections.push({
         id: `edge-${idx}-${e.source}-${e.target}`,
         a: e.source,
         b: e.target,
-        reason: `${e.edge_type.toUpperCase()} correlation (wt: ${e.weight})`,
-        confidence: Math.min(0.99, 0.65 + (e.weight * 0.05)),
+        type: relType,
+        relationship_type: relType,
+        epistemic_status: epistemic,
+        direction: e.direction || undefined,
+        evidence_refs: evidenceRefs,
+        event_refs: e.event_refs || [],
+        has_provenance: e.has_provenance,
+        evidenceIds: evidenceRefs,
+        reason: relType
+          ? `${relType} · ${epistemic === "INFERRED" ? "inferred" : "observed"}${provNote}`
+          : `${e.edge_type.toUpperCase()} correlation (wt: ${e.weight})${provNote}`,
+        confidence: e.confidence != null
+          ? e.confidence
+          : Math.min(0.99, 0.65 + (e.weight * 0.05)),
       });
     }
   });

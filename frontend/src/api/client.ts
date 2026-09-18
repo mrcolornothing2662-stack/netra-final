@@ -43,6 +43,7 @@ export interface UserSession {
   email?: string | null;
   rank?: string | null;
   unit?: string | null;
+  must_change_password?: boolean;
 }
 
 export function getStoredUser(): UserSession | null {
@@ -139,7 +140,13 @@ export async function login(username: string, password: string): Promise<UserSes
     user = await fetchMe();
   } catch {
     // Token is valid but /me failed — record what the token told us, no more.
-    user = { id: "", username, role: data.role || "io", full_name: data.full_name ?? null };
+    user = {
+      id: "",
+      username,
+      role: data.role || "io",
+      full_name: data.full_name ?? null,
+      must_change_password: !!data.must_change_password,
+    };
   }
   setStoredUser(user);
   return user;
@@ -162,9 +169,42 @@ export async function fetchMe(): Promise<UserSession> {
     email: u.email ?? null,
     rank: u.rank ?? null,
     unit: u.unit ?? null,
+    must_change_password: !!u.must_change_password,
   };
   setStoredUser(user);
   return user;
+}
+
+/** Change the current authenticated user's password. */
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const token = getToken();
+  if (!token) throw new ApiError("Not authenticated", 401);
+  const res = await fetch(`${API_BASE}/auth/change-password`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  });
+  if (!res.ok) {
+    let detail = "Failed to change password.";
+    try {
+      const d = await res.json();
+      if (d && typeof d === "object" && "detail" in d) {
+        detail = String((d as { detail: unknown }).detail);
+      }
+    } catch {}
+    throw new ApiError(detail, res.status);
+  }
+  const current = getStoredUser();
+  if (current) {
+    current.must_change_password = false;
+    setStoredUser(current);
+  }
 }
 
 /** Sign out: clear the session and return to the login screen. */
@@ -212,17 +252,33 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   }
 
   if (!res.ok) {
-    let errorDetail = `Request failed with status ${res.status}`;
+    let backendDetail: string | null = null;
     let errorData: unknown = null;
     try {
       errorData = await res.json();
       if (typeof errorData === "object" && errorData !== null && "detail" in errorData) {
-        errorDetail = String((errorData as { detail: unknown }).detail);
+        backendDetail = String((errorData as { detail: unknown }).detail);
       }
     } catch {
       // response was not json
     }
-    throw new ApiError(errorDetail, res.status, errorData);
+
+    // Never surface a raw server exception (e.g. "… status 500") to the
+    // investigator. Map the status to an honest, actionable message and keep
+    // the technical detail on the error object for diagnostics.
+    let message: string;
+    if (res.status >= 500) {
+      message = "The service could not complete the request. Please retry.";
+    } else if (res.status === 403) {
+      message = "You do not have access to this resource.";
+    } else if (res.status === 404) {
+      message = backendDetail && backendDetail.toLowerCase() !== "not found"
+        ? backendDetail
+        : "The requested case or resource was not found.";
+    } else {
+      message = backendDetail || `Request failed (status ${res.status}).`;
+    }
+    throw new ApiError(message, res.status, errorData);
   }
 
   const contentType = res.headers.get("content-type");

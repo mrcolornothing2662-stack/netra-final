@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from correlation.regex_extractors import extract as extract_regex
 from ml.registry import get_model_registry
+from nlp.entity_validation import validate_entity_candidate
 
 logger = logging.getLogger(__name__)
 
@@ -121,10 +122,13 @@ def run_hybrid_extraction(text: str) -> HybridExtractionResult:
             for p in mpreds
         ]
 
-    # Add primary model predictions to mentions (skip hard-ID overlaps)
+    # Add primary model predictions to mentions (skip hard-ID overlaps and invalid entities)
     primary_preds = ml_predictions_map.get(primary_name, [])
     for p in primary_preds:
         if _spans_overlap(p.span_start, p.span_end, seen_spans):
+            continue
+        if not validate_entity_candidate(p.entity_type, p.raw_value):
+            logger.debug("[Hybrid] Rejected ML candidate: type=%s value=%r", p.entity_type, p.raw_value)
             continue
         result.mentions.append(ExtractedMention(
             entity_type=p.entity_type,
@@ -145,6 +149,9 @@ def run_hybrid_extraction(text: str) -> HybridExtractionResult:
     ner_results = extract_ner(text)
     for ner in ner_results:
         if _spans_overlap(ner.span_start, ner.span_end, seen_spans):
+            continue
+        if not validate_entity_candidate(ner.entity_type, ner.raw_value):
+            logger.debug("[Hybrid] Rejected NER candidate: type=%s value=%r", ner.entity_type, ner.raw_value)
             continue
         result.mentions.append(ExtractedMention(
             entity_type=ner.entity_type,

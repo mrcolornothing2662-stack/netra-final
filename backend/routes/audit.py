@@ -42,20 +42,39 @@ def _canonical_ts(dt: datetime | None) -> str:
 @router.get("")
 @router.get("/")
 async def list_all_audit_logs(
-    page:      int = 1,
-    page_size: int = 50,
-    db:        AsyncSession = Depends(get_db),
-    current:   User = Depends(get_current_user),
+    page:          int = 1,
+    page_size:     int = 50,
+    action:        str | None = None,
+    resource_type: str | None = None,
+    case_id:       str | None = None,
+    db:            AsyncSession = Depends(get_db),
+    current:       User = Depends(get_current_user),
 ):
-    """Paginated global audit ledger for admin/analyst."""
-    rows = (await db.execute(
-        select(AuditLog)
-        .order_by(AuditLog.id.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-    )).scalars().all()
+    """Paginated global audit ledger for admin/analyst, with optional filters.
 
-    total = (await db.execute(select(func.count()).select_from(AuditLog))).scalar() or 0
+    Filters (all optional): action, resource_type, case_id (matches rows whose
+    resource_type == 'case' AND resource_id == case_id).
+    """
+    conditions = []
+    if action:
+        conditions.append(AuditLog.action == action)
+    if resource_type:
+        conditions.append(AuditLog.resource_type == resource_type)
+    if case_id:
+        conditions.append(AuditLog.resource_type == "case")
+        conditions.append(AuditLog.resource_id == case_id)
+
+    stmt = select(AuditLog)
+    count_stmt = select(func.count()).select_from(AuditLog)
+    if conditions:
+        stmt = stmt.where(*conditions)
+        count_stmt = count_stmt.where(*conditions)
+    stmt = stmt.order_by(AuditLog.id.desc())
+    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+
+    rows = (await db.execute(stmt)).scalars().all()
+
+    total = (await db.execute(count_stmt)).scalar() or 0
 
     return {
         "page":  page,

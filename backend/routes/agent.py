@@ -13,7 +13,6 @@ Endpoints:
 """
 import json
 import logging
-import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -25,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import AgentAction, AgentHold, AgentSession, AuditLog, User
 from db.session import get_db
 from routes.auth import get_current_user, require_role
+from routes.case_access import require_case_access
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -32,17 +32,6 @@ router = APIRouter()
 # In-memory agent registry (session_id → agent instance)
 # For production: replace with Redis/DB-backed agent state
 _active_agents: dict = {}
-
-
-def _case_uuid(case_id: str):
-    """Coerce a case-id path param to uuid.UUID for binding against UUID columns.
-    On SQLite the UUID type binds via value.hex, so a raw string 500s
-    ('str' object has no attribute 'hex'). Returns None for a malformed id so
-    callers can return an empty result instead of erroring."""
-    try:
-        return case_id if isinstance(case_id, uuid.UUID) else uuid.UUID(str(case_id))
-    except (ValueError, AttributeError, TypeError):
-        return None
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -64,14 +53,22 @@ async def run_autonomous_investigation(
     Launch an autonomous investigation for the given case.
     The agent runs in the background; poll /status for progress.
     Returns immediately with the session_id.
+
+    The case is resolved and access-checked BEFORE the agent is created, so an
+    unknown/inaccessible case returns 404 and no investigation is launched.
     """
+    # Resolve + authorize the case first — never launch an agent for a case that
+    # cannot be loaded. This is the route-level half of the agent's hard stop.
+    case = await require_case_access(db, current, case_id, write=True)
+    canonical_case_id = str(case.id)
+
     from armoriq.sandbox import ensure_sandbox_rules
     await ensure_sandbox_rules(db)
 
     from armoriq.agent import AutonomousInvestigationAgent
 
     agent = AutonomousInvestigationAgent(
-        case_id=case_id,
+        case_id=canonical_case_id,
         triggered_by=current.username,
         db=db,
     )
@@ -84,10 +81,11 @@ async def run_autonomous_investigation(
 
     return {
         "session_id": session_id,
-        "case_id": case_id,
+        "case_id": canonical_case_id,
+        "case_number": case.case_number,
         "status": "investigating",
         "message": "Autonomous investigation started. Poll /status for progress.",
-        "poll_url": f"/api/v1/agent/{case_id}/status?session_id={session_id}",
+        "poll_url": f"/api/v1/agent/{canonical_case_id}/status?session_id={session_id}",
     }
 
 
@@ -105,29 +103,35 @@ async def get_agent_status(
     case_id:    str,
     session_id: Optional[str] = None,
     db:         AsyncSession = Depends(get_db),
-    _:          User = Depends(get_current_user),
+    current:    User = Depends(get_current_user),
 ):
     """
     Get current agent status, action timeline, and pending holds.
     If session_id is provided, return that specific session.
     Otherwise return the most recent session for the case.
     """
+    case = await require_case_access(db, current, case_id)
+    canonical_case_id = str(case.id)
+
     # Try in-memory first (live agent)
     if session_id and session_id in _active_agents:
         agent = _active_agents[session_id]
         return {
             "session_id": agent.session_id,
-            "case_id": case_id,
+            "case_id": canonical_case_id,
             "status": agent.status,
             "actions": agent.actions,
             "pending_hold": agent.pending_hold,
             "action_count": len(agent.actions),
+            "case_snapshot": getattr(agent, "case_snapshot", {}),
+            "investigation_plan": getattr(agent, "investigation_plan", []),
+            "final_report": getattr(agent, "final_report", None),
         }
 
     # Fall back to DB
     query = (
         select(AgentSession)
-        .where(AgentSession.case_id == _case_uuid(case_id))
+        .where(AgentSession.case_id == case.id)
         .order_by(AgentSession.started_at.desc())
         .limit(1)
     )
@@ -140,7 +144,7 @@ async def get_agent_status(
     if not session:
         return {
             "session_id": None,
-            "case_id": case_id,
+            "case_id": canonical_case_id,
             "status": "idle",
             "actions": [],
             "pending_hold": None,
@@ -168,17 +172,33 @@ async def get_agent_status(
             "risk_level": hold.risk_level,
             "affected_resource": hold.affected_resource_json,
             "armoriq_reason": hold.armoriq_reason,
+            "governance_outcome": "blocked_by_design",
             "status": hold.status,
             "requested_at": hold.created_at.isoformat() if hold.created_at else None,
         }
 
+    actions = session.actions_json or []
+    # Reconstruct the plan/snapshot/report from the persisted action ledger so
+    # the UI keeps them after the in-memory agent session ends.
+    plan_entry = next(
+        (a for a in actions if a.get("action_type") == "INVESTIGATION_PLAN" and a.get("details")),
+        None,
+    )
+    summary_entry = next(
+        (a for a in actions if a.get("action_type") == "INVESTIGATION_SUMMARY" and a.get("details")),
+        None,
+    )
+
     return {
         "session_id": session.id,
-        "case_id": case_id,
+        "case_id": canonical_case_id,
         "status": session.status,
-        "actions": session.actions_json or [],
+        "actions": actions,
         "pending_hold": hold_dict,
-        "action_count": len(session.actions_json or []),
+        "action_count": len(actions),
+        "case_snapshot": (plan_entry or {}).get("details", {}).get("case_snapshot", {}) if plan_entry else {},
+        "investigation_plan": (plan_entry or {}).get("details", {}).get("plan", []) if plan_entry else [],
+        "final_report": summary_entry.get("details") if summary_entry else None,
         "started_at": session.started_at.isoformat() if session.started_at else None,
         "completed_at": session.completed_at.isoformat() if session.completed_at else None,
     }
@@ -188,18 +208,19 @@ async def get_agent_status(
 async def list_agent_actions(
     case_id: str,
     db:      AsyncSession = Depends(get_db),
-    _:       User = Depends(get_current_user),
+    current: User = Depends(get_current_user),
 ):
     """List all agent actions for a case with ArmorIQ enforcement states."""
+    case = await require_case_access(db, current, case_id)
     result = await db.execute(
         select(AgentAction)
-        .where(AgentAction.case_id == _case_uuid(case_id))
+        .where(AgentAction.case_id == case.id)
         .order_by(AgentAction.created_at.asc())
     )
     actions = result.scalars().all()
 
     return {
-        "case_id": case_id,
+        "case_id": str(case.id),
         "actions": [
             {
                 "id": a.id,
@@ -361,6 +382,7 @@ async def list_pending_holds(
                 "authorization_boundary": h.authorization_boundary,
                 "risk_level": h.risk_level,
                 "affected_resource": h.affected_resource_json,
+                "governance_outcome": "blocked_by_design",
                 "requested_at": h.created_at.isoformat() if h.created_at else None,
             }
             for h in holds
@@ -373,16 +395,19 @@ async def list_pending_holds(
 async def get_armoriq_audit_trail(
     case_id: str,
     db:      AsyncSession = Depends(get_db),
-    _:       User = Depends(get_current_user),
+    current: User = Depends(get_current_user),
 ):
     """
     Return the complete ArmorIQ-enhanced audit trail for a case.
     Includes both agent actions and the SHA-256 chain entries.
     """
+    case = await require_case_access(db, current, case_id)
+    canonical_case_id = str(case.id)
+
     # Agent actions (case_id is a UUID column — coerce; resource_id below is Text)
     actions_result = await db.execute(
         select(AgentAction)
-        .where(AgentAction.case_id == _case_uuid(case_id))
+        .where(AgentAction.case_id == case.id)
         .order_by(AgentAction.created_at.asc())
     )
     actions = actions_result.scalars().all()
@@ -391,7 +416,7 @@ async def get_armoriq_audit_trail(
     chain_result = await db.execute(
         select(AuditLog)
         .where(
-            AuditLog.resource_id == case_id,
+            AuditLog.resource_id == canonical_case_id,
             AuditLog.action.like("ARMORIQ_%"),
         )
         .order_by(AuditLog.id.asc())
@@ -399,7 +424,7 @@ async def get_armoriq_audit_trail(
     chain_entries = chain_result.scalars().all()
 
     return {
-        "case_id": case_id,
+        "case_id": canonical_case_id,
         "agent_actions": [
             {
                 "id": a.id,

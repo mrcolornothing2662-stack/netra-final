@@ -13,6 +13,7 @@ export const CASE_TABS = [
   { id: "timeline", label: "Timeline" },
   { id: "analysis", label: "Analysis" },
   { id: "cognitive", label: "Cognitive" },
+  { id: "agent", label: "Agent" },
   { id: "report", label: "Report" },
 ] as const;
 export type CaseTabId = (typeof CASE_TABS)[number]["id"];

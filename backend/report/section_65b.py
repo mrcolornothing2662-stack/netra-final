@@ -21,7 +21,7 @@ except (ImportError, OSError):
     HTML = None
 
 from config import settings
-from db.models import AuditLog, Case, EvidenceFile, Entity, Correlation
+from db.models import AuditLog, Case, EvidenceFile, Entity, Correlation, InvestigationFinding
 
 REPORT_DIR    = pathlib.Path(settings.report_output_dir)
 TEMPLATE_DIR  = pathlib.Path(settings.report_template_dir)
@@ -125,7 +125,32 @@ _TEMPLATE_HTML = """<!DOCTYPE html>
 
 <div class="page-break"></div>
 
-<h2>5. Audit Log (last {{ audit_entries|length }} entries)</h2>
+<h2>5. Unified Findings ({{ finding_count }} total)</h2>
+<p style="font-size:10px;color:#666;margin:6px 0;">
+  Persisted, evidence-traceable findings produced by the cognitive orchestrator.
+  Verification flags are shown alongside the findings they qualify.
+</p>
+<table>
+  <tr><th>#</th><th>Type</th><th>Severity</th><th>Confidence</th><th>Title</th><th>Engine</th><th>Evidence</th><th>Status</th></tr>
+  {% for f in findings %}
+  <tr>
+    <td>{{ loop.index }}</td>
+    <td><strong>{{ f.finding_type }}</strong></td>
+    <td>{{ f.severity }}</td>
+    <td>{{ "%.0f%%"|format((f.confidence or 0) * 100) if f.confidence is not none else '—' }}</td>
+    <td>{{ f.title }}</td>
+    <td>{{ f.source_engine or '—' }}{% if f.engine_version %} v{{ f.engine_version }}{% endif %}</td>
+    <td>{{ (f.evidence_refs or [])|length }}</td>
+    <td>{{ f.status }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="8" style="text-align:center;color:#888;">No findings recorded.</td></tr>
+  {% endfor %}
+</table>
+
+<div class="page-break"></div>
+
+<h2>6. Audit Log (last {{ audit_entries|length }} entries)</h2>
 <table>
   <tr><th>ID</th><th>Timestamp</th><th>Action</th><th>Entry Hash (SHA-256)</th></tr>
   {% for entry in audit_entries %}
@@ -188,6 +213,13 @@ async def generate_65b_pdf(
         )
     )).scalars().all()
 
+    # Fetch unified findings (verified intelligence output)
+    findings = (await db.execute(
+        select(InvestigationFinding)
+        .where(InvestigationFinding.case_id == case_uuid)
+        .order_by(InvestigationFinding.confidence.desc(), InvestigationFinding.created_at.desc())
+    )).scalars().all()
+
     # Fetch audit entries
     audit_entries = (await db.execute(
         select(AuditLog)
@@ -210,6 +242,8 @@ async def generate_65b_pdf(
         entity_count=len(entities),
         correlations=correlations,
         link_count=len(correlations),
+        findings=findings,
+        finding_count=len(findings),
         audit_entries=audit_entries,
         generated_at=generated_at,
         version="1.0.0",
@@ -222,13 +256,13 @@ async def generate_65b_pdf(
         HTML(string=html_content).write_pdf(str(pdf_path))
     else:
         _write_reportlab_pdf(
-            pdf_path, case, ev_files, entities, correlations, audit_entries, generated_at
+            pdf_path, case, ev_files, entities, correlations, findings, audit_entries, generated_at
         )
 
     return str(pdf_path)
 
 
-def _write_reportlab_pdf(pdf_path, case, evidence_files, entities, correlations, audit_entries, generated_at):
+def _write_reportlab_pdf(pdf_path, case, evidence_files, entities, correlations, findings, audit_entries, generated_at):
     """Portable Section 65B analysis-aid PDF when WeasyPrint is unavailable."""
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet
@@ -260,7 +294,22 @@ def _write_reportlab_pdf(pdf_path, case, evidence_files, entities, correlations,
     entity_rows = [["Type", "Canonical Value", "Bridge Score"]]
     entity_rows.extend([[e.entity_type, e.canonical_value, f"{(e.bridge_score or 0):.3f}"] for e in entities[:50]] or [["No entities extracted.", "", ""]])
     story.append(Table(entity_rows, repeatRows=1, colWidths=[35 * mm, 105 * mm, 30 * mm]))
-    story.extend([Spacer(1, 5 * mm), Paragraph(f"4. Flagged Hidden Links ({len(correlations)} total)", styles["Heading2"]), Paragraph(f"Audit entries included: {len(audit_entries)}", body)])
+    story.extend([Spacer(1, 5 * mm), Paragraph(f"4. Flagged Hidden Links ({len(correlations)} total)", styles["Heading2"])])
+    story.extend([Spacer(1, 5 * mm), Paragraph(f"5. Unified Findings ({len(findings)} total)", styles["Heading2"])])
+    finding_rows = [["Type", "Severity", "Confidence", "Title", "Engine", "Status"]]
+    finding_rows.extend([
+        [
+            f.finding_type,
+            f.severity,
+            f"{(f.confidence or 0) * 100:.0f}%" if f.confidence is not None else "-",
+            (f.title or "")[:80],
+            f.source_engine or "-",
+            f.status,
+        ]
+        for f in findings
+    ] or [["No findings recorded.", "", "", "", "", ""]])
+    story.append(Table(finding_rows, repeatRows=1, colWidths=[35 * mm, 20 * mm, 22 * mm, 70 * mm, 30 * mm, 23 * mm]))
+    story.extend([Spacer(1, 5 * mm), Paragraph(f"Audit entries included: {len(audit_entries)}", body)])
     document = SimpleDocTemplate(str(pdf_path), pagesize=A4, rightMargin=15 * mm, leftMargin=15 * mm)
     for table in (item for item in story if isinstance(item, Table)):
         table.setStyle(TableStyle([

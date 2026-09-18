@@ -59,9 +59,49 @@ def _normalize_value(value: Any) -> str:
     return text.lower()
 
 
+def _normalize_timestamp(val: Any) -> str:
+    if not val:
+        return ""
+    from datetime import datetime
+    if isinstance(val, datetime):
+        if val.tzinfo is not None:
+            return val.astimezone().strftime("%Y-%m-%dT%H:%M:%S")
+        return val.strftime("%Y-%m-%dT%H:%M:%S")
+    s = str(val).strip()
+    try:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is not None:
+            return dt.astimezone().strftime("%Y-%m-%dT%H:%M:%S")
+        return dt.strftime("%Y-%m-%dT%H:%M:%S")
+    except Exception:
+        return s.lower()
+
+
 def canonical_tuple(event: dict[str, Any], fields: Sequence[str]) -> tuple[str, ...]:
     """Canonical, format-insensitive representation of one evidence row."""
-    return tuple(_normalize_value(event.get(f)) for f in fields)
+    meta = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+    def _val(f: str) -> Any:
+        v = event.get(f)
+        if v is not None and str(v).strip() != "":
+            return v
+        mv = meta.get(f)
+        if mv is not None and str(mv).strip() != "":
+            return mv
+        if f == "amount":
+            return meta.get("amount") or meta.get("debit") or meta.get("credit") or ""
+        if f == "reference":
+            ref = meta.get("reference") or meta.get("ref_no") or event.get("text") or meta.get("raw_line") or ""
+            return str(ref)[:40]
+        return ""
+
+    out = []
+    for f in fields:
+        raw_val = _val(f)
+        if f in ("timestamp", "time", "date"):
+            out.append(_normalize_timestamp(raw_val))
+        else:
+            out.append(_normalize_value(raw_val))
+    return tuple(out)
 
 
 def _perm_hash(item: str, perm: int, seed: int) -> int:

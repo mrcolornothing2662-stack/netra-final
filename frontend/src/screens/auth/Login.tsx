@@ -51,8 +51,12 @@ export function Login() {
     setSubmitting(true);
     setError(null);
     try {
-      await login(username.trim(), password);
-      navigate(next, { replace: true });
+      const user = await login(username.trim(), password);
+      if (user.must_change_password) {
+        navigate("/change-password", { replace: true });
+      } else {
+        navigate(next, { replace: true });
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Sign-in failed. Please try again.");
       setSubmitting(false);
@@ -132,7 +136,13 @@ export function Login() {
             <button
               className={s.submit}
               type="button"
-              onClick={() => navigate(next, { replace: true })}
+              onClick={() => {
+                if (currentUser.must_change_password) {
+                  navigate("/change-password", { replace: true });
+                } else {
+                  navigate(next, { replace: true });
+                }
+              }}
             >
               ENTER COMMAND CENTER <Icon name="arrow" size={15} />
             </button>

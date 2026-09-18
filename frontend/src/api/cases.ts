@@ -87,4 +87,7 @@ export const casesApi = {
     apiClient.get<BackendCaseSummary>(`/cases/${id}/summary`),
 
   stats: () => apiClient.get<Record<string, unknown>>("/cases/stats/summary"),
+
+  update: (id: string, payload: Partial<CreateCasePayload> & { status?: string }) =>
+    apiClient.patch<BackendCaseItem>(`/cases/${id}`, payload),
 };

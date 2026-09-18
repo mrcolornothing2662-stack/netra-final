@@ -29,8 +29,8 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 480  # 8 hours for investigation sessions
 
     database_url: str = "postgresql://cyberdrishti:cyberdrishti_secret@localhost:5432/cyberdrishti"
-    db_pool_size: int = 10
-    db_max_overflow: int = 20
+    db_pool_size: int = 25
+    db_max_overflow: int = 50
 
     redis_url: str = "redis://localhost:6379/0"
 
@@ -51,6 +51,11 @@ class Settings(BaseSettings):
 
     upload_dir: str = str(_BASE_DIR / "uploads")
     max_upload_size_mb: int = 100
+
+    enable_cognitive_orchestration: bool = True
+    # Cross-case blind-index analysis reaches across case boundaries; it stays
+    # off unless an administrator explicitly authorises it.
+    enable_cross_case_analysis: bool = False
 
     fuzzy_merge_threshold: float = 0.85
     hidden_link_temporal_tau: float = 3600.0   # seconds

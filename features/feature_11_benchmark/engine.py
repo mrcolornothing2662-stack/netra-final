@@ -22,6 +22,7 @@ perfection is the known failure mode of this entire approach.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 import string
@@ -214,9 +215,43 @@ class BenchmarkGenerator:
         assert l1[-1]["account"] not in cdr_blob and l1[-1]["account"] not in chat_blob
         assert accused["phone"] not in bank_blob
 
+        has_bsa_cert = bool(self.cfg.get("has_bsa_cert", False))
+        seizure_memo = f"""================================================================================
+RECORD OF SEIZURE UNDER SECTION 105 BHARATIYA NAGARIK SURAKSHA SANHITA (BNSS), 2023
+================================================================================
+Case Reference   : FIR-{seed % 900 + 100} / 2026
+Police Station   : Cyber Crime Police Station, Central District
+Date & Time      : {start.strftime('%Y-%m-%d %H:%M:%S IST')}
+Location         : Residence of Complainant {victim_name}
+
+INDEPENDENT PANCH WITNESSES:
+1. Shri Rajeshwar Prasad, Age 44, Resident of Sector 14
+2. Smt. Meenakshi Sundaram, Age 39, Resident of Sector 14
+
+ITEMS SEIZED & DIGITALLY PRESERVED:
+1. 01 Mobile Handset (Samsung Galaxy S22)
+   - Original Storage Path: /evidence/handset_extraction_01.tar
+   - SHA-256 Hash: {hashlib.sha256(chat_blob.encode()).hexdigest()}
+2. Certified Bank Statement Ledger ({len(bank_rows)} transaction rows)
+   - Account Holder: Complainant & Intermediary Mules
+   - SHA-256 Hash: {hashlib.sha256(bank_blob.encode()).hexdigest()}
+3. Call Detail Records (CDR) from Carrier
+   - Tower Cell ID: {circle['towers'][0]}
+   - Section 63 BSA Hash Certificate: {'ATTACHED' if has_bsa_cert else 'PENDING_NODAL_OFFICER_SIGNATURE'}
+
+AUDIO-VIDEO ELECTRONIC RECORDING:
+Audio-video recording of search and seizure executed pursuant to Section 105 BNSS.
+Media File: SEIZURE_REC_{seed}.mp4 (SHA-256 Verified)
+
+Signatures:
+Investigating Officer: Inspector V. K. Deshmukh
+Panch Witnesses: [Signed], [Signed]
+================================================================================
+"""
+
         ground_truth = {
             "typology": typology_key,
-            "stages": typ["stages"],
+            "stages": typ.get("stages", []),
             "entities": [
                 {"role": x["role"], "name": x["name"], "phone": x.get("phone"),
                  "upi": x.get("upi"), "account": x.get("account")}
@@ -235,6 +270,10 @@ class BenchmarkGenerator:
             }],
             "ocr_noise_applied": self.cfg["ocr_pct"] > 0,
             "decoy_topic": topic,
+            "statutory_provisions": typ.get("statutory_provisions", []),
+            "defence_challenges": typ.get("defence_challenges", []),
+            "golden_hours_actions": typ.get("golden_hours_actions", []),
+            "has_bsa_certificate": has_bsa_cert,
         }
         return {
             "case_id": f"SYN-{typology_key}-{seed}",
@@ -243,6 +282,8 @@ class BenchmarkGenerator:
                 "bank_statement.csv": bank_rows,
                 "bank_statement_noisy.csv": noisy_rows,
                 "cdr.csv": cdr_rows,
+                "evidence_seizure_memo.txt": seizure_memo,
             },
             "ground_truth": ground_truth,
         }
+

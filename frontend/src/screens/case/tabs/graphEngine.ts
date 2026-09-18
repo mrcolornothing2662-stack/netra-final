@@ -225,6 +225,12 @@ export interface ModelEdge {
     preferential_attachment?: number;
     [key: string]: number | undefined;
   };
+  // Unified case-graph provenance (observed semantic edges).
+  relationship_type?: string;
+  epistemic_status?: "OBSERVED" | "INFERRED";
+  direction?: string;
+  evidence_refs?: string[];
+  event_refs?: string[];
 }
 
 /* ── Section 65B Explainable AI Hidden Link Data Model ── */
@@ -420,7 +426,7 @@ export const GraphModel = {
   },
 
   allEdges(
-    rawConnections: Array<{ id: string; a: string; b: string; type?: string; directed?: number; confidence?: number; reason?: string; evidenceIds?: string[]; is_hidden?: boolean; score?: number; threshold?: number; component_scores?: Record<string, number> }>,
+    rawConnections: Array<{ id: string; a: string; b: string; type?: string; directed?: number; confidence?: number; reason?: string; evidenceIds?: string[]; is_hidden?: boolean; score?: number; threshold?: number; component_scores?: Record<string, number>; relationship_type?: string; epistemic_status?: "OBSERVED" | "INFERRED"; direction?: string; evidence_refs?: string[]; event_refs?: string[] }>,
     entityKindMap: Map<string, string>,
     isDemo: boolean = false
   ): ModelEdge[] {
@@ -443,11 +449,17 @@ export const GraphModel = {
         directed: d !== undefined ? d : (EDGE_DIR[t] || 0),
         conf: cn.confidence || (cn.score ? Math.round(cn.score * 100) : 85),
         reason: cn.reason || (isHidden ? 'Section 65B Inferred Correlation' : 'Correlated activity window'),
-        evidenceIds: cn.evidenceIds || (isHidden ? [] : ['evd-txn-45000']),
+        // Real provenance only — never fabricate an evidence id for a real case.
+        evidenceIds: cn.evidenceIds || cn.evidence_refs || [],
         is_hidden: isHidden,
         score: cn.score,
         threshold: cn.threshold || 0.365,
-        component_scores: cn.component_scores
+        component_scores: cn.component_scores,
+        relationship_type: cn.relationship_type,
+        epistemic_status: cn.epistemic_status,
+        direction: cn.direction,
+        evidence_refs: cn.evidence_refs,
+        event_refs: cn.event_refs
       };
     });
 
@@ -815,16 +827,6 @@ export const GraphIntel = {
             });
           }
 
-          if (nodeU.meta?.includes('₹') || nodeV.meta?.includes('₹') || nodeU.kind === 'ACCOUNT' || nodeV.kind === 'ACCOUNT') {
-            reasons.push({
-              type: "FINANCIAL_MATCH",
-              title: "Financial Velocity Correlation",
-              description: "Transaction temporal proximity within 14-minute settlement window",
-              contribution: "SUPPORTING",
-              score: 0.72
-            });
-          }
-
           inferred.push({
             id: `hid-inf-${u}-${v}`,
             sourceId: u,
@@ -840,8 +842,11 @@ export const GraphIntel = {
             sourceCommunity: commU,
             targetCommunity: commV,
             reasons,
-            supportingEvidenceIds: ["evd-txn-45000", "evd-cdr-18"],
-            inferenceMethod: "Section 65B 7-Feature Precision-Gated Classifier",
+            // This is a client-side structural heuristic over the real graph.
+            // It must NOT fabricate evidence references — real evidence
+            // provenance comes from the backend inferred relationships.
+            supportingEvidenceIds: [],
+            inferenceMethod: "Client-side structural link heuristic (not evidence-backed)",
             status: "candidate"
           });
         }

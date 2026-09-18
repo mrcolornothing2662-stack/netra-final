@@ -8,7 +8,7 @@ CyberDrishti AI — Auth Routes (JWT login/logout, current user)
 """
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Header, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -35,6 +35,7 @@ class Token(BaseModel):
     expires_in:   int
     role:         str
     full_name:    str | None
+    must_change_password: bool = False
 
 
 class UserOut(BaseModel):
@@ -46,6 +47,7 @@ class UserOut(BaseModel):
     unit:      str | None
     role:      str
     is_active: bool
+    must_change_password: bool = False
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -61,10 +63,10 @@ def _hash_password(plain: str) -> str:
     return bcrypt.hashpw(plain.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 
-def _create_token(user_id: str, role: str) -> tuple[str, int]:
+def _create_token(user_id: str, role: str, must_change_password: bool = False) -> tuple[str, int]:
     expire    = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
     expire_in = settings.access_token_expire_minutes * 60
-    payload   = {"sub": user_id, "role": role, "exp": expire}
+    payload   = {"sub": user_id, "role": role, "exp": expire, "must_change_password": must_change_password}
     token     = jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
     return token, expire_in
 
@@ -99,6 +101,56 @@ async def get_current_user(
     if not user or not user.is_active:
         raise cred_exc
     return user
+
+
+async def _resolve_user(token: str, db: AsyncSession) -> User:
+    """Shared JWT verification — decode, load the active user, else raise 401."""
+    cred_exc = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    import uuid
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        user_id = payload.get("sub")
+        if not user_id:
+            raise cred_exc
+        try:
+            uuid_obj = uuid.UUID(user_id, version=4)
+        except ValueError:
+            raise cred_exc
+    except JWTError:
+        raise cred_exc
+
+    result = await db.execute(select(User).where(User.id == uuid_obj))
+    user = result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise cred_exc
+    return user
+
+
+async def get_current_user_token_or_header(
+    db:            AsyncSession = Depends(get_db),
+    token:         str | None = Query(None),
+    authorization: str | None = Header(None),
+) -> User:
+    """Auth dependency for clients that cannot send headers.
+
+    Browser ``EventSource`` cannot set an ``Authorization`` header, so the SSE
+    endpoints accept the JWT either from the ``token`` query parameter OR from
+    the standard bearer header. Scoped to streaming endpoints only.
+    """
+    tok = token
+    if not tok and authorization and authorization.lower().startswith("bearer "):
+        tok = authorization.split(" ", 1)[1].strip()
+    if not tok:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return await _resolve_user(tok, db)
 
 
 def require_role(*roles: str):
@@ -137,42 +189,11 @@ async def login(
     result = await db.execute(select(User).where(func.lower(User.username) == username))
     user = result.scalar_one_or_none()
 
-    # If admin account does not exist in DB yet (e.g. serverless environment where lifespan didn't fire),
-    # seed the initial admin account idempotently.
-    if not user and username in (settings.initial_admin_username.lower(), "rana"):
-        admin_user = User(
-            username=username,
-            email=f"{username}@cyberdrishti.gov.in",
-            hashed_password=_hash_password("admin123"),
-            full_name="Shubham Rana" if username == "rana" else settings.initial_admin_full_name,
-            rank="DSP",
-            unit="Cyber Cell",
-            role="admin",
-            is_active=True,
-        )
-        db.add(admin_user)
-        try:
-            await db.commit()
-            await db.refresh(admin_user)
-            user = admin_user
-        except Exception:
-            await db.rollback()
-            result = await db.execute(select(User).where(func.lower(User.username) == username))
-            user = result.scalar_one_or_none()
-
+    # Authenticate ONLY via bcrypt hash verification — no backdoor, no
+    # plaintext fallback, no auto-seeding at login time.
     valid = False
     if user:
         valid = _verify_password(form.password, user.hashed_password)
-        # Self-healing fallback: if logging in as initial admin or rana with default passwords
-        is_admin_user = username in (settings.initial_admin_username.lower(), "rana")
-        is_valid_pw = form.password in (settings.initial_admin_password, "admin123", "rana123", "admin")
-        if not valid and is_admin_user and is_valid_pw:
-            valid = True
-            user.hashed_password = _hash_password(form.password)
-            try:
-                await db.commit()
-            except Exception:
-                await db.rollback()
 
     if not user or not valid:
         # Record failed attempt
@@ -189,12 +210,13 @@ async def login(
     # Clear failed attempts on successful login
     _FAILED_ATTEMPTS.pop(username, None)
 
-    token, expires_in = _create_token(str(user.id), user.role)
+    token, expires_in = _create_token(str(user.id), user.role, must_change_password=user.must_change_password)
     return Token(
         access_token=token,
         expires_in=expires_in,
         role=user.role,
         full_name=user.full_name,
+        must_change_password=user.must_change_password,
     )
 
 
@@ -209,4 +231,32 @@ async def me(current: User = Depends(get_current_user)):
         unit=current.unit,
         role=current.role,
         is_active=current.is_active,
+        must_change_password=current.must_change_password,
     )
+
+
+# ── Change Password ──────────────────────────────────────────────────────────
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.post("/change-password")
+async def change_password(
+    body: ChangePasswordRequest,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """Change the current user's password.  Clears ``must_change_password``."""
+    if not _verify_password(body.current_password, current.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
+    if body.new_password == body.current_password:
+        raise HTTPException(status_code=400, detail="New password must differ from current password")
+    current.hashed_password = _hash_password(body.new_password)
+    current.must_change_password = False
+    await db.commit()
+    return {"status": "ok", "message": "Password changed successfully"}
+

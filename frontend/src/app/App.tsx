@@ -5,6 +5,7 @@ import { ScrollToTop } from "./ScrollToTop";
 import { EnterOverlay } from "./EnterOverlay";
 import { Landing } from "../screens/landing/Landing";
 import { Login } from "../screens/auth/Login";
+import { ChangePassword } from "../screens/auth/ChangePassword";
 import { CommandCenter } from "../screens/command/CommandCenter";
 import { Investigations } from "../screens/investigations/Investigations";
 import { CaseScreen } from "../screens/case/CaseScreen";
@@ -19,6 +20,7 @@ export function App() {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/change-password" element={<ChangePassword />} />
         <Route element={<RequireAuth><AppShell /></RequireAuth>}>
           <Route path="/command" element={<CommandCenter />} />
           <Route path="/investigations" element={<Investigations />} />

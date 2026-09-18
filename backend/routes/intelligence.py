@@ -6,12 +6,15 @@ Communication analysis (CDR/WhatsApp) and Financial analysis (bank transactions)
 from datetime import datetime, timezone
 from collections import defaultdict
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import EvidenceEvent, Entity, EntityMention, User
 from db.session import get_db
+from orchestration.finding_service import list_findings, serialize_finding
+from orchestration.intelligence_state import compute_state, get_state, serialize_state
+from orchestration.investigation_orchestrator import InvestigationOrchestrator
 from routes.auth import get_current_user
 from routes.case_access import require_case_access
 
@@ -190,7 +193,14 @@ async def financial_intelligence(
 
     for ev in bank_events:
         meta = ev.event_metadata or {}
-        narration = meta.get("narration", meta.get("description", "")).strip()
+        parse_status = meta.get("parser_status", "OK")
+        # `narration` may be present with a None value (the parser stores None for
+        # an empty narration), so a `.get(key, default)` would return None and
+        # `.strip()` would raise → HTTP 500. Coerce with `or`.
+        narration = (meta.get("narration") or meta.get("description") or "").strip()
+        # Never surface parser corruption as transaction text.
+        if parse_status == "PARSE_ERROR" or meta.get("narration_valid") is False:
+            narration = "Unparsed transaction"
 
         debit = _parse_amount(meta.get("debit") or meta.get("withdrawal"))
         credit = _parse_amount(meta.get("credit") or meta.get("deposit"))
@@ -206,6 +216,7 @@ async def financial_intelligence(
             "source_line": ev.source_line,
             "source_page": ev.source_page,
             "source_doc": (meta.get("source_doc", "")),
+            "parse_status": parse_status,
         }
         transactions.append(txn)
         total_debit += debit or 0.0
@@ -270,6 +281,75 @@ async def financial_intelligence(
         "rapid_transfers": rapid_transfers,
         "top_counterparties_by_volume": top_counterparties,
     }
+
+
+# ── Unified findings / intelligence state / orchestration ─────────────────────
+
+@router.post("/cases/{case_id}/analyze")
+async def analyze_case(
+    case_id: str,
+    body:    dict | None = Body(None),
+    db:      AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """
+    Run the cognitive orchestrator over the case's current evidence. Selects
+    only applicable engines, persists their unified findings and refreshes the
+    intelligence state. Records an AnalysisRun either way.
+    """
+    case = await require_case_access(db, current, case_id, write=True)
+    engine_names = (body or {}).get("engines")
+    try:
+        result = await InvestigationOrchestrator().run(
+            db, case.id, trigger="manual", engine_names=engine_names, actor_id=str(current.id)
+        )
+    except Exception as exc:
+        # Persist the failed run for the audit trail, then surface the error.
+        await db.commit()
+        raise HTTPException(500, f"Cognitive analysis failed: {exc}")
+    await db.commit()
+    return result
+
+
+@router.get("/cases/{case_id}/findings")
+async def case_findings(
+    case_id:         str,
+    finding_type:    str | None = Query(None),
+    severity:        str | None = Query(None, pattern="^(LOW|MEDIUM|HIGH|CRITICAL)$"),
+    status:          str | None = Query(None, pattern="^(OPEN|CONFIRMED|DISMISSED|SUPERSEDED)$"),
+    min_confidence:  float | None = Query(None, ge=0.0, le=1.0),
+    limit:           int = Query(200, ge=1, le=1000),
+    offset:          int = Query(0, ge=0),
+    db:              AsyncSession = Depends(get_db),
+    current:         User = Depends(get_current_user),
+):
+    """Unified findings for a case, ranked by confidence."""
+    case = await require_case_access(db, current, case_id)
+    rows = await list_findings(
+        db, case.id,
+        finding_type=finding_type, severity=severity, status=status,
+        min_confidence=min_confidence, limit=limit, offset=offset,
+    )
+    return {
+        "case_id": case_id,
+        "count":   len(rows),
+        "findings": [serialize_finding(row) for row in rows],
+    }
+
+
+@router.get("/cases/{case_id}/state")
+async def case_intelligence_state(
+    case_id: str,
+    db:      AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """Materialised intelligence snapshot; computed live if never analysed."""
+    case = await require_case_access(db, current, case_id)
+    row = await get_state(db, case.id)
+    if row is not None:
+        return serialize_state(row, case_id)
+    state = await compute_state(db, case.id)
+    return {"case_id": case_id, "computed": True, "last_run_at": None, **state}
 
 
 def _parse_amount(val) -> float | None:

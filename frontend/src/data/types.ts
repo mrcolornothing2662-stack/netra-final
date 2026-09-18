@@ -63,7 +63,8 @@ export type EntityKind =
   | "CAMPAIGN"
   | "EMAIL"
   | "THREAT_ACTOR"
-  | "PHONE";
+  | "PHONE"
+  | "CELL_TOWER";
 
 export interface Entity {
   id: string;
@@ -94,6 +95,13 @@ export interface Evidence {
   notes?: string;
   source_type?: SourceType;
   provenance?: Provenance;
+  parent_evidence_id?: string | null;
+  version_number?: number;
+  version_status?: "original" | "variant" | "superseded" | string;
+  fingerprint_hash?: string;
+  variant_details?: Record<string, any>;
+  is_variant?: boolean;
+  variant_note?: string | null;
 }
 
 export interface CaseEvent {
@@ -105,6 +113,12 @@ export interface CaseEvent {
   entityIds: string[];
   evidenceIds: string[];
   source_type?: SourceType;
+  /** Event-time normalization state: OK | TIME_NORMALIZATION_REQUIRED | PARSE_ERROR */
+  timeStatus?: "OK" | "TIME_NORMALIZATION_REQUIRED" | "PARSE_ERROR" | string;
+  /** When NETRA ingested the parent artifact (distinct from event time). */
+  ingestedAt?: string | null;
+  /** Routine/low-signal event (collapsed by the timeline by default). */
+  isRoutine?: boolean;
 }
 
 export interface Connection {
@@ -121,6 +135,13 @@ export interface Connection {
   score?: number;
   threshold?: number;
   component_scores?: Record<string, number>;
+  // Semantic + epistemic provenance from the unified case graph.
+  relationship_type?: string;
+  epistemic_status?: "OBSERVED" | "INFERRED";
+  direction?: string;
+  evidence_refs?: string[];
+  event_refs?: string[];
+  has_provenance?: boolean;
   source_type?: SourceType;
 }
 

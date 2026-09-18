@@ -53,6 +53,8 @@ async def copilot_endpoint(
             "phones": [],
             "upis": [],
             "accounts": [],
+            "ips": [],
+            "devices": [],
             "names": [],
         }
         for val, etype in ent_rows:
@@ -67,6 +69,10 @@ async def copilot_endpoint(
                 case_facts["amounts"].append(val)
             elif etype_str in ("ACCOUNT", "BANK_ACC"):
                 case_facts["accounts"].append(val)
+            elif etype_str in ("IP", "IPV4"):
+                case_facts["ips"].append(val)
+            elif etype_str in ("DEVICE", "DEV"):
+                case_facts["devices"].append(val)
             else:
                 case_facts["names"].append(val)
 
@@ -97,9 +103,14 @@ async def copilot_endpoint(
 
         result["verification"] = {
             "passed": critique.passed,
+            "governance_verdict": critique.governance_verdict,
+            "governance_reasons": critique.governance_reasons,
             "flags": flags,
+            "citations": critique.citations,
+            "grounded_spans": critique.grounded_spans,
             "statutory_violations": critique.statutory_violations,
             "grounding_failures": critique.grounding_failures,
+            "admissibility_disclaimer": critique.admissibility_disclaimer,
             "correction_instructions": critique.correction_instructions,
         }
     except Exception as exc:

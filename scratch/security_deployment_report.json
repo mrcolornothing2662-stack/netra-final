@@ -1,0 +1,43 @@
+{
+  "multi_tenant_idor": {
+    "anti_enumeration_verified": true,
+    "endpoints_screened": 9,
+    "admin_override_verified": true
+  },
+  "jwt_security": {
+    "signature_tampering_rejected": true,
+    "foreign_key_rejected": true,
+    "alg_none_rejected": true,
+    "expiration_enforced": true,
+    "malformed_headers_rejected": true
+  },
+  "security_headers": {
+    "nosniff": true,
+    "anti_clickjacking_deny": true,
+    "xss_protection": true,
+    "referrer_policy": true,
+    "permissions_policy": true
+  },
+  "path_traversal": {
+    "direct_traversal_blocked": true,
+    "zip_slip_neutralized": true,
+    "safe_display_name_jailed": true
+  },
+  "zero_knowledge_privacy": {
+    "hmac_sha256_tokens_verified": true,
+    "foreign_pii_shielded": true,
+    "section_94_bnss_compliant": true
+  },
+  "rate_limiting_lockout": {
+    "lockout_threshold_enforced": true,
+    "http_429_returned": true
+  },
+  "sqli_resilience": {
+    "payloads_tested": 18,
+    "sql_injection_immune": true,
+    "parameterized_queries_verified": true
+  },
+  "total_audit_seconds": 1.89,
+  "checkpoints_passed": 34,
+  "total_checkpoints": 34
+}

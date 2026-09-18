@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "purpose": "Investigative action catalog. Statutory instruments per verified research (cutoff 2026-09-06): BNSS 106 = CrPC 102 (evidentiary seizure incl. account freeze; AP HC Blue Sea Ventures 2025 caveat), BNSS 107 (attachment of proceeds), BNSS 94 = CrPC 91 (production of documents, expressly electronic), 1930/CFCFRMS (I4C-run; banks execute stop-payment). Draft templates are structural placeholders — every output is labelled a DRAFT requiring IO signature and legal verification. Fill placeholders ONLY from case data; the engine refuses to invent values.",
-    "golden_hours_note": "Fraud funds layer out within hours (I4C golden-hour doctrine); urgency decays exponentially with configurable half-life."
+    "purpose": "Investigative action catalog. Statutory instruments per verified research (cutoff 2026-09-06): BNSS 106 = CrPC 102 (evidentiary seizure incl. account freeze; AP HC Blue Sea Ventures 2025 caveat), BNSS 107 (attachment of proceeds), BNSS 94 = CrPC 91 (production of documents, expressly electronic), BNSS 105 (seizure with videography and panchnama), Section 63 BSA (certificate for admissibility of electronic records), 1930/CFCFRMS (I4C-run; banks execute stop-payment). Draft templates are structural placeholders — every output is labelled a DRAFT requiring IO signature and legal verification. Fill placeholders ONLY from case data; the engine refuses to invent values.",
+    "golden_hours_note": "Fraud funds layer out within hours (I4C golden-hour doctrine); urgency decays exponentially with category-specific half-lives."
   },
   "golden_hours": 2.0,
   "actions": [
@@ -11,6 +11,7 @@
       "category": "asset_preservation",
       "statute": "I4C CFCFRMS SOP (no statutory order needed)",
       "latency_hours": 0.5,
+      "decay_half_life_hours": 2.0,
       "friction_cost": 0.1,
       "requires": ["complaint_ref"],
       "draft_template": "Referral record: complaint {complaint_ref} forwarded to 1930/CFCFRMS for stop-payment across the beneficiary trail. DRAFT — verify complaint reference before transmission.",
@@ -22,6 +23,7 @@
       "category": "asset_preservation",
       "statute": "Section 106 BNSS (formerly Section 102 CrPC)",
       "latency_hours": 1.0,
+      "decay_half_life_hours": 2.0,
       "friction_cost": 0.3,
       "requires": ["account", "ifsc", "bank_name", "amount_unwithdrawn"],
       "draft_template": "To: The Nodal Officer, {bank_name} ({ifsc}). Order under Section 106 BNSS: freeze debits on account {account} holding approximately Rs. {amount_unwithdrawn} connected to case crime. Report to the jurisdictional Magistrate as required. DRAFT — requires IO signature and legal verification before issue.",
@@ -33,6 +35,7 @@
       "category": "asset_preservation",
       "statute": "Section 107 BNSS",
       "latency_hours": 24.0,
+      "decay_half_life_hours": 24.0,
       "friction_cost": 0.6,
       "requires": ["account", "ifsc", "bank_name", "amount_unwithdrawn"],
       "draft_template": "Application under Section 107 BNSS for attachment of proceeds in account {account} at {bank_name} ({ifsc}), approximately Rs. {amount_unwithdrawn}. DRAFT — requires IO signature and legal verification before filing.",
@@ -44,6 +47,7 @@
       "category": "evidence_expansion",
       "statute": "Section 94 BNSS (formerly Section 91 CrPC; expressly covers electronic records)",
       "latency_hours": 48.0,
+      "decay_half_life_hours": 48.0,
       "friction_cost": 0.4,
       "requires": ["phone", "period_start", "period_end"],
       "draft_template": "Requisition under Section 94 BNSS to the service provider: furnish CDR/IPDR for {phone} from {period_start} to {period_end} for case investigation. DRAFT — requires IO signature; route via the jurisdictional mechanism in force.",
@@ -55,6 +59,7 @@
       "category": "evidence_expansion",
       "statute": "Judicial order (court direction)",
       "latency_hours": 168.0,
+      "decay_half_life_hours": 168.0,
       "friction_cost": 0.8,
       "requires": ["cell_id", "period_start", "period_end"],
       "draft_template": "Application to the learned Magistrate for a tower dump of cell {cell_id} between {period_start} and {period_end}. DRAFT — requires IO signature and legal verification.",
@@ -64,11 +69,48 @@
       "code": "KYC_FETCH",
       "description": "Account-opening documents and photograph from the beneficiary bank.",
       "category": "identity_resolution",
-      "statute": "Bank nodal-officer request under investigation",
+      "statute": "Section 94 BNSS / Bank Nodal Request",
       "latency_hours": 24.0,
+      "decay_half_life_hours": 24.0,
       "friction_cost": 0.3,
       "requires": ["account", "bank_name"],
-      "draft_template": "Request to {bank_name}: furnish account-opening KYC for account {account}. DRAFT — requires IO signature.",
+      "draft_template": "Request to {bank_name}: furnish account-opening Customer Application Form (CAF) and KYC documents for account {account}. DRAFT — requires IO signature.",
+      "asset_scoped": false
+    },
+    {
+      "code": "CCTV_ATM_PRESERVATION",
+      "description": "Preserve and requisition ATM / branch CCTV surveillance footage before standard 15/30-day overwrite.",
+      "category": "evidence_preservation",
+      "statute": "Section 94 BNSS (Production of electronic evidence)",
+      "latency_hours": 12.0,
+      "decay_half_life_hours": 24.0,
+      "friction_cost": 0.3,
+      "requires": ["account", "bank_name", "atm_location", "transaction_timestamp"],
+      "draft_template": "Requisition under Section 94 BNSS to {bank_name}: preserve and furnish CCTV video recordings for ATM/branch at {atm_location} during transaction timestamp {transaction_timestamp} concerning account {account}. DRAFT — requires IO signature.",
+      "asset_scoped": false
+    },
+    {
+      "code": "DEVICE_SEIZURE_PANCHNAMA",
+      "description": "Physical seizure of mobile handset or computing hardware with mandatory videography and 2 witnesses.",
+      "category": "evidence_preservation",
+      "statute": "Section 105 BNSS (Search & Seizure with videography and panchnama)",
+      "latency_hours": 4.0,
+      "decay_half_life_hours": 24.0,
+      "friction_cost": 0.5,
+      "requires": ["suspect_name", "device_description", "imei_or_serial"],
+      "draft_template": "Seizure Panchnama under Section 105 BNSS: seize digital device {device_description} (IMEI/Serial: {imei_or_serial}) from possession of {suspect_name} with contemporaneous videography and two independent punch witnesses. DRAFT — requires IO signature.",
+      "asset_scoped": false
+    },
+    {
+      "code": "SECTION_63_BSA_CERT_REQUEST",
+      "description": "Requisition dual-signed Section 63(4) BSA certificate from service provider certifying hash and operating condition.",
+      "category": "statutory_compliance",
+      "statute": "Section 63(4) BSA, 2023 (Mandatory Certificate for Electronic Evidence)",
+      "latency_hours": 24.0,
+      "decay_half_life_hours": 48.0,
+      "friction_cost": 0.2,
+      "requires": ["entity_name", "record_description"],
+      "draft_template": "Statutory requisition under Section 63(4) BSA to {entity_name}: furnish certificate verifying SHA-256 hash, extraction date, and uncompromised operating condition of electronic record: {record_description}. DRAFT — requires IO signature.",
       "asset_scoped": false
     }
   ]

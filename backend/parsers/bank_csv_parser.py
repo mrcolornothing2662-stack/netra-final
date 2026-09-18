@@ -42,6 +42,23 @@ _DT_FMTS = [
     "%d/%m/%y", "%d %b %Y", "%d %B %Y", "%b %d, %Y", "%Y/%m/%d %H:%M:%S",
 ]
 
+# A narration fragment that is really a clock/index artifact (e.g. "509:53:44")
+# signals a mis-mapped column, not real transaction text. It must never be shown.
+_TIMELIKE_RE = re.compile(r"^\d{1,3}:\d{2}(:\d{2})?$")
+
+
+def _looks_like_corrupt_narration(value: str | None) -> bool:
+    if not value:
+        return False
+    t = value.strip()
+    if not t:
+        return False
+    if _TIMELIKE_RE.match(t):
+        return True
+    # Numeric-only fragments containing ':' are corruption; a plain reference
+    # number (no colon) is a legitimate identifier and is left alone.
+    return ":" in t and not re.search(r"[A-Za-z]", t)
+
 
 def _parse_amount(raw: Any) -> float | None:
     if raw is None:
@@ -193,17 +210,45 @@ def _dataframe_to_events(df: pd.DataFrame, source_doc: str) -> list[dict]:
         if primary_amount is None and not (from_acct or to_acct or narration):
             continue
 
-        amount_str = f"Rs.{primary_amount:,.2f}" if primary_amount else ""
+        # ── Validation ────────────────────────────────────────────────────────
+        # A transaction is only reliable when its core fields are structured and
+        # sane. Corruption is reported (PARSE_ERROR), never rendered.
+        parse_errors: list[str] = []
+        corrupt_narration = _looks_like_corrupt_narration(narration)
         if model == "transfer" or (from_acct or to_acct):
-            lhs = from_acct or "?"
-            rhs = to_acct or "?"
-            desc = f" ({narration})" if narration else ""
+            if not from_acct:
+                parse_errors.append("missing_source_account")
+            if not to_acct:
+                parse_errors.append("missing_destination_account")
+            if primary_amount is None:
+                parse_errors.append("missing_amount")
+            if not ts:
+                parse_errors.append("missing_or_invalid_timestamp")
+        else:  # ledger
+            if primary_amount is None:
+                parse_errors.append("missing_amount")
+            if corrupt_narration:
+                parse_errors.append("corrupt_narration")
+
+        parser_status = "PARSE_ERROR" if parse_errors else "OK"
+
+        # Build investigator-facing text from structured fields only. Parser
+        # corruption is never concatenated into the display string.
+        if parser_status == "PARSE_ERROR":
+            amount_str = ""
+            direction = ""
+            text = f"Unparsed transaction (line {lineno}) — {', '.join(parse_errors)}"
+        elif model == "transfer" or (from_acct or to_acct):
+            amount_str = f"Rs.{primary_amount:,.2f}"
             chan = f" {channel}" if channel else ""
-            text = f"{lhs} -> {rhs} | {amount_str}{chan}{desc}".strip()
+            desc = f" ({narration})" if narration and not corrupt_narration else ""
+            text = f"{from_acct} -> {to_acct} | {amount_str}{chan}{desc}".strip()
         else:
+            amount_str = f"Rs.{primary_amount:,.2f}"
             direction = "CREDIT" if (credit_val and credit_val > 0) else (
                 "DEBIT" if (debit_val and debit_val > 0) else "TXN")
-            text = f"{narration} | {direction} {amount_str}".strip(" |")
+            narration_part = narration if (narration and not corrupt_narration) else ""
+            text = f"{narration_part} | {direction} {amount_str}".strip(" |")
 
         raw_line = ",".join("" if pd.isna(v) else str(v) for v in row.values)
 
@@ -214,13 +259,16 @@ def _dataframe_to_events(df: pd.DataFrame, source_doc: str) -> list[dict]:
             "event_type":  "bank_txn",
             "source_line": lineno,
             "source_page": None,
+            "parser_status": parser_status,
+            "parse_errors": parse_errors,
             "metadata": {
                 "model":         model,
                 "narration":     narration or None,
+                "narration_valid": not corrupt_narration,
                 "credit":        credit_val,
                 "debit":         debit_val,
                 "balance":       balance_val,
-                "amount":        primary_amount,
+                "amount":        None if parser_status == "PARSE_ERROR" else primary_amount,
                 "from_account":  from_acct,
                 "to_account":    to_acct,
                 "upi_id":        upi_id,
@@ -228,6 +276,8 @@ def _dataframe_to_events(df: pd.DataFrame, source_doc: str) -> list[dict]:
                 "status":        status,
                 "ref_no":        ref_no,
                 "account":       to_acct or from_acct,
+                "parser_status": parser_status,
+                "parse_errors":  parse_errors,
                 "raw_line":      raw_line,
             },
         })

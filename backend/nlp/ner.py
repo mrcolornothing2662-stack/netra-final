@@ -95,7 +95,7 @@ _DATE_RE = re.compile(
 _LOCATIONS = re.compile(
     r'\b(delhi|mumbai|kolkata|chennai|bangalore|bengaluru|hyderabad|pune|ahmedabad|'
     r'jaipur|lucknow|kanpur|nagpur|patna|bhopal|agra|varanasi|surat|gurgaon|noida|'
-    r'chandigarh|amritsar|ludhiana|indore|bhopal|visakhapatnam|coimbatore|'
+    r'chandigarh|mohali|amritsar|ludhiana|indore|bhopal|visakhapatnam|coimbatore|'
     r'kochi|thiruvananthapuram|rajasthan|maharashtra|gujarat|kerala|karnataka|'
     r'tamilnadu|tamil\s+nadu|andhra|telangana|odisha|bihar|jharkhand|west\s+bengal|'
     r'uttar\s+pradesh|madhya\s+pradesh|himachal|uttarakhand|assam|meghalaya|'

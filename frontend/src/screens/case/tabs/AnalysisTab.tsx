@@ -6,6 +6,8 @@ import { adaptFinding } from "../../../adapters/findingAdapter";
 import { copilotApi, type CopilotResponse } from "../../../api/copilot";
 import { Button } from "../../../components/primitives/Button";
 import { Icon } from "../../../components/icons";
+import { CommIntelPanel } from "./CommIntelPanel";
+import { FinanceIntelPanel } from "./FinanceIntelPanel";
 import s from "../../../components/case/case.module.css";
 
 export function AnalysisTab({ caseId, onOpenEvidence }: { caseId: string; onOpenEvidence: () => void }) {
@@ -31,6 +33,11 @@ export function AnalysisTab({ caseId, onOpenEvidence }: { caseId: string; onOpen
     ? rawFindings.map((f, i) => adaptFinding(f, i))
     : (isDemo ? findingsForCase(caseId) : []);
 
+  // Deterministic case state. We never render zeros when the summary failed to
+  // load — that would falsely imply an empty case.
+  const counts = activeCaseSummary?.counts;
+  const summaryUnavailable = !activeCaseSummary;
+
   const handleAsk = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!question.trim()) return;
@@ -41,7 +48,11 @@ export function AnalysisTab({ caseId, onOpenEvidence }: { caseId: string; onOpen
       const res = await copilotApi.ask(caseId, question.trim());
       setCopilotResult(res);
     } catch (err: unknown) {
-      setCopilotError("Copilot query failed. Please verify case access and backend connectivity.");
+      const status = (err as { status?: number })?.status;
+      if (status === 403) setCopilotError("Access denied for this case.");
+      else if (status === 404) setCopilotError("Case or copilot endpoint not found.");
+      else if (typeof status === "number" && status >= 500) setCopilotError("AI narrative service could not complete the request.");
+      else setCopilotError("AI narrative unavailable. Deterministic findings above are unaffected.");
     } finally {
       setAsking(false);
     }
@@ -53,20 +64,73 @@ export function AnalysisTab({ caseId, onOpenEvidence }: { caseId: string; onOpen
         Autonomous analysis identifying cross-channel patterns, timing signatures, and anomaly clusters for this investigation.
       </p>
 
-      {/* AI Investigation Copilot — honest availability. When the language model
-          is offline we state so explicitly and never render a fabricated assessment. */}
-      {aiOnline === false ? (
-        <div style={{ marginBottom: "var(--space-10)", padding: "var(--space-6)", background: "var(--critical-tint)", border: "1px solid rgba(255, 92, 92, 0.4)", borderRadius: "var(--radius-card)" }}>
-          <div style={{ font: "var(--type-mono-xs)", letterSpacing: "0.08em", color: "var(--critical)", marginBottom: 6 }}>
-            AI ANALYST UNAVAILABLE
+      {/* ── DETERMINISTIC CASE ANALYSIS ─────────────────────────────── */}
+      <div style={{ marginBottom: "var(--space-8)", padding: "var(--space-5)", background: "var(--surface-1)", border: "1px solid var(--line)", borderRadius: "var(--radius-card)" }}>
+        <div className="t-label" style={{ marginBottom: "var(--space-3)" }}>Case Analysis</div>
+        {summaryUnavailable ? (
+          <div style={{ color: "var(--text-secondary)", font: "var(--type-body-sm)" }}>
+            <strong style={{ color: "var(--critical)" }}>CASE ANALYSIS UNAVAILABLE</strong>
+            <div style={{ marginTop: 4 }}>
+              The case summary could not be loaded. Counts are not shown because they would
+              falsely imply an empty case.
+            </div>
           </div>
-          <div style={{ color: "var(--text-secondary)", font: "var(--type-body-sm)", lineHeight: 1.6 }}>
-            Language-model analysis could not be completed.<br />
-            No AI-generated assessment is being shown.
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "var(--space-4)" }}>
+            <AnalysisMetric label="Evidence" value={counts!.evidence} />
+            <AnalysisMetric label="Events" value={counts!.events} />
+            <AnalysisMetric label="Entities" value={counts!.entities} />
+            <AnalysisMetric label="Relationships" value={counts!.connections} />
+            <AnalysisMetric label="Findings" value={counts!.suspicious_findings} />
           </div>
-          <p className="t-mono-xs measure" style={{ color: "var(--text-muted)", marginTop: "var(--space-3)" }}>
-            Deterministic tools — correlation, timeline, and evidence — remain available on their tabs.
+        )}
+      </div>
+
+      {/* ── KEY FINDINGS (deterministic) ────────────────────────────── */}
+      <div className="t-label" style={{ marginBottom: "var(--space-4)" }}>
+        Key Findings ({fnds.length})
+      </div>
+      {fnds.length === 0 ? (
+        <div style={{
+          padding: "var(--space-10) var(--space-6)", textAlign: "center",
+          background: "var(--surface-1)", border: "1px dashed var(--line-strong)",
+          borderRadius: "var(--radius-card)"
+        }}>
+          <div style={{ font: "var(--type-mono-xs)", color: "var(--intel)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "var(--space-2)" }}>
+            Correlation Engine
+          </div>
+          <h3 style={{ font: "var(--type-title-3)", color: "var(--text-primary)", marginBottom: "var(--space-2)" }}>
+            No Findings Yet
+          </h3>
+          <p className="measure" style={{ color: "var(--text-secondary)", font: "var(--type-body-sm)", margin: "0 auto var(--space-6) auto" }}>
+            Findings appear automatically once evidence is ingested and the cognitive
+            analysis runs. They are derived deterministically — not from the language model.
           </p>
+          <Button variant="primary" icon="plus" onClick={onOpenEvidence}>
+            Ingest Evidence
+          </Button>
+        </div>
+      ) : (
+        fnds.map(f => (
+          <div key={f.id} style={{ marginBottom: "var(--space-8)" }}>
+            <FindingBlock finding={f} onOpenEvidence={onOpenEvidence} />
+          </div>
+        ))
+      )}
+
+      {/* ── OPTIONAL AI NARRATIVE ───────────────────────────────────── */}
+      <div className="t-label" style={{ marginBottom: "var(--space-3)", marginTop: "var(--space-6)" }}>
+        AI Narrative <span style={{ color: "var(--text-muted)" }}>· optional</span>
+      </div>
+      {aiOnline === false ? (
+        <div style={{ marginBottom: "var(--space-10)", padding: "var(--space-4) var(--space-5)", background: "var(--surface-1)", border: "1px dashed var(--line-strong)", borderRadius: "var(--radius-card)" }}>
+          <div style={{ font: "var(--type-mono-xs)", letterSpacing: "0.08em", color: "var(--warning)" }}>
+            AI NARRATIVE UNAVAILABLE
+          </div>
+          <div style={{ color: "var(--text-secondary)", font: "var(--type-body-sm)", marginTop: 4, lineHeight: 1.6 }}>
+            The language-model provider is unavailable. No AI-generated narrative is shown.
+            <strong> Deterministic analysis and findings above are unaffected.</strong>
+          </div>
         </div>
       ) : (
       <div style={{ marginBottom: "var(--space-10)", padding: "var(--space-6)", background: "var(--surface-1)", border: "1px solid var(--line)", borderRadius: "var(--radius-card)" }}>
@@ -162,36 +226,20 @@ export function AnalysisTab({ caseId, onOpenEvidence }: { caseId: string; onOpen
       </div>
       )}
 
-      {/* Autonomous Findings */}
-      <div className="t-label" style={{ marginBottom: "var(--space-4)" }}>
-        Autonomous Correlation Findings ({fnds.length})
+      {/* ── Deep Intelligence Panels ─────────────────────────────────── */}
+      <CommIntelPanel caseId={caseId} />
+      <FinanceIntelPanel caseId={caseId} />
+    </div>
+  );
+}
+
+function AnalysisMetric({ label, value, color }: { label: string; value: number; color?: string }) {
+  return (
+    <div>
+      <div style={{ font: "var(--type-mono-xs)", color: "var(--text-muted)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+        {label}
       </div>
-      {fnds.length === 0 ? (
-        <div style={{
-          padding: "var(--space-10) var(--space-6)", textAlign: "center",
-          background: "var(--surface-1)", border: "1px dashed var(--line-strong)",
-          borderRadius: "var(--radius-card)"
-        }}>
-          <div style={{ font: "var(--type-mono-xs)", color: "var(--intel)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "var(--space-2)" }}>
-            Correlation Engine
-          </div>
-          <h3 style={{ font: "var(--type-title-3)", color: "var(--text-primary)", marginBottom: "var(--space-2)" }}>
-            No Autonomous Findings Yet
-          </h3>
-          <p className="measure" style={{ color: "var(--text-secondary)", font: "var(--type-body-sm)", margin: "0 auto var(--space-6) auto" }}>
-            The autonomous pattern detector monitors ingested evidence for coordinated money routing, cell tower timing signatures, and syndicate communication patterns.
-          </p>
-          <Button variant="primary" icon="plus" onClick={onOpenEvidence}>
-            Ingest Evidence to Trigger Analysis
-          </Button>
-        </div>
-      ) : (
-        fnds.map(f => (
-          <div key={f.id} style={{ marginBottom: "var(--space-8)" }}>
-            <FindingBlock finding={f} onOpenEvidence={onOpenEvidence} />
-          </div>
-        ))
-      )}
+      <div style={{ font: "var(--type-title-2)", color: color || "var(--text-primary)" }}>{value}</div>
     </div>
   );
 }

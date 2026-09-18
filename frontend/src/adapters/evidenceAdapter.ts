@@ -78,5 +78,12 @@ export function adaptEvidenceFile(ev: BackendEvidenceFile): Evidence {
       : "Cryptographic custody logged.",
     addedAt: uploadedAt ? new Date(uploadedAt).getTime() : Date.now(),
     user: false,
+    parent_evidence_id: ev.parent_evidence_id || rawEv.parent_evidence_id || null,
+    version_number: ev.version_number ?? rawEv.version_number ?? 1,
+    version_status: ev.version_status || rawEv.version_status || "original",
+    fingerprint_hash: ev.fingerprint || rawEv.fingerprint || null,
+    variant_details: ev.variant_details || rawEv.variant_details || {},
+    is_variant: Boolean(ev.is_variant || rawEv.is_variant || (ev.version_status === "variant") || (ev.parse_error && ev.parse_error.startsWith("[VARIANT]"))),
+    variant_note: ev.variant_note || rawEv.variant_note || (ev.parse_error && ev.parse_error.startsWith("[VARIANT]") ? ev.parse_error : null),
   };
 }

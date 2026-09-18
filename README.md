@@ -1,252 +1,112 @@
-# 🔍 CyberDrishti AI — Autonomous Cyber Crime Intelligence & Evidence Copilot
+# 👁️ NETRA 5.0 — Cognitive Cyber Crime Intelligence & Forensic Workstation
 
 <p align="center">
+  <img src="https://img.shields.io/badge/Release-NETRA--5.0--RC1-00B4D8?style=for-the-badge&logo=shield" alt="NETRA 5.0 RC1" />
+  <img src="https://img.shields.io/badge/Engineering_Validation-100%25_PASS-success?style=for-the-badge" alt="100% Pass" />
+  <img src="https://img.shields.io/badge/Statutory_Standard-BSA_S.63_%7C_BNSS_S.193-gold?style=for-the-badge" alt="BSA S.63 / BNSS S.193" />
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.10+" />
-  <img src="https://img.shields.io/badge/FastAPI-0.109-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" />
-  <img src="https://img.shields.io/badge/Next.js-14.1-black?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js 14" />
-  <img src="https://img.shields.io/badge/PyTorch-2.2-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white" alt="PyTorch" />
-  <img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL" />
-  <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker" />
-  <img src="https://img.shields.io/badge/Compliance-Section_65B_IT_Act-gold?style=for-the-badge" alt="Section 65B IT Act" />
+  <img src="https://img.shields.io/badge/FastAPI-0.115-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/Frontend-React_18_%7C_Vite-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React 18" />
+  <img src="https://img.shields.io/badge/PostgreSQL-16_Alpine-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL 16" />
+  <img src="https://img.shields.io/badge/Redis-7.2_Alpine-DC382D?style=for-the-badge&logo=redis&logoColor=white" alt="Redis 7.2" />
+  <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker Ready" />
 </p>
 
-> **Empowering Law Enforcement & Cyber Crime Cells** with GNN-powered Hidden Link Analysis, Multilingual Hinglish NER, Local RAG Copilot with Legal Citations, and Cryptographically Audited Section 65B Evidence Certificates.
+> **Empowering Law Enforcement & State Cyber Crime Directorates** with automated multi-modal evidence ingestion, epistemic graph reasoning, behavioral anomaly profiling, adversarial courtroom defense modeling, zero-knowledge cross-case intelligence, and tamper-evident statutory dossiers under the Bharatiya Sakshya Adhiniyam, 2023.
 
 ---
 
 ## 📌 Executive Summary
 
-**CyberDrishti AI** is an enterprise-grade, 100% on-premise cyber crime investigation copilot engineered for police departments, state cyber cells, and financial intelligence units. 
+**NETRA 5.0** is an enterprise-grade, on-premise cognitive cyber-investigation workstation engineered for law enforcement agencies, cybercrime investigation divisions, and intelligence directorates.
 
-During cyber fraud investigations (such as UPI scam networks, digital arrest rackets, or mule account syndicates), investigators are inundated with thousands of pages of unstructured evidence—Call Detail Records (CDRs), IPDR logs, Hinglish WhatsApp exports, and bank statements. Manually correlating these disparate data sources takes weeks, while syndicate operators switch burner SIMs and accounts in hours.
+In complex financial fraud and extortion schemes (such as "Digital Arrest" scams, multi-layer mule account syndicates, loan app extortion, and illegal payment gateway laundering), investigators are inundated with thousands of pages of unstructured evidence: Call Detail Records (CDRs), bank statements, WhatsApp chat exports, IPDR logs, and seizure memos. Manually analyzing these disparate streams takes weeks, allowing syndicates to drain accounts and vanish.
 
-**CyberDrishti AI automates evidence parsing, entity extraction, hidden relationship discovery, and court-admissible report generation—reducing investigation turnaround time from weeks to seconds.**
-
----
-
-## 🚀 Key Innovation Highlights
-
-### 1. 🕸️ Hidden-Link Graph Neural Engine
-Traditional link analysis only shows explicit connections (e.g., A called B). CyberDrishti AI uses a **6-feature topological combinator with logistic regression** to uncover covert relationships:
-- **Jaccard Similarity** (Shared contacts and entities)
-- **Adamic-Adar Index** (Rare shared node weighting)
-- **Temporal Proximity ($\tau=1\text{hr}$)** (Burst communication correlation)
-- **Financial Velocity ($\tau=2\text{hr}$)** (Pass-through transaction timing)
-- **Bridge Score & Preferential Attachment**
-- *Precision-Gated Output*: Minimum $\ge 90\%$ confidence guarantee with full mathematical explainability.
-
-### 2. 🤖 Custom Transformer (CyberDrishtiLM) & HingBERT NER
-Cyber crime evidence in India frequently contains code-mixed Hinglish (*"Bhai 50k transfer kar de is UPI id par fast"*). 
-- **CyberDrishtiLM**: Custom ~2.3M parameter Transformer with BPE tokenizer trained on code-mixed fraud corpus.
-- **HingBERT Fine-Tune**: Fine-tuned IndicBERT model classifying 12 entity types: `PER`, `PHONE`, `UPI`, `ACCOUNT`, `AMOUNT`, `BANK`, `EMAIL`, `ORG`, `LOCATION`, `IP`, `DATE`, `DEVICE`.
-
-### 3. 💬 Local RAG Copilot with Legal Statutory Citations
-- **Zero Cloud Leakage**: Uses local Ollama LLM (`llama3.2:1b`) to ensure no sensitive case data ever leaves the department network.
-- **Statutory Legal Grounding**: Built-in verification engine automatically maps findings to relevant sections of the **Information Technology Act, 2000** and **Bharatiya Nyaya Sanhita (BNS / IPC)** with citation validation to eliminate hallucinations.
-
-### 4. 📜 Tamper-Evident SHA-256 Audit Chain & Section 65B Certificates
-- **Cryptographic Custody**: Blockchain-inspired SHA-256 hash chaining tracks every evidence upload, extraction, and investigator action.
-- **Instant Section 65B PDF Generation**: Generates court-ready Section 65B certificates formatted according to Indian Evidence Act standards, featuring hash verification tables and digital signature placeholders.
+**NETRA 5.0 automates the entire investigative lifecycle**: from rapid 82-second ingestion of 18,000+ events to real-time Golden Hours asset freezing, behavioral velocity anomaly detection, cross-case syndicate clustering, adversarial trial vulnerability auditing, and automated Section 63 BSA court-ready charge sheet generation.
 
 ---
 
-## 🏗️ System Architecture
+## 🚀 The 11 Canonical Investigation Capabilities (Roadmap F01–F11)
+
+| Feature ID | Capability Name | Investigative Role | Statutory / Standard Grounding |
+|:---:|---|---|---|
+| **F01** | **Document Version Timeline** | Forensic lineage tracking, structural diffing, and alteration detection for forged KYC IDs and notices. | Section 63 BSA (Original vs Variant) |
+| **F02** | **Behavioral Anomaly Profiler** | Detects rapid pass-through velocity (< 30m turnaround), dormant-to-burst spikes, and off-hour ATM cash drains. | RBI Master Directions on Mule Accounts |
+| **F02** | **Defence Bot Adversarial Audit** | Simulates adversarial defense counsel attacks, flagging missing panchnama video timestamps and procedural gaps before trial. | Section 105 BNSS & Section 63 BSA |
+| **F03** | **Syndicate Radar** | Discovers organized criminal networks across 50+ cases using Zero-Knowledge HMAC-SHA256 Blind Indexing without exposing raw citizen PII. | Section 94 BNSS Privacy Protection |
+| **F04** | **Hypothesis Investigation Board** | Mathematically evaluates competing attribution hypotheses (Mule Syndicate vs Identity Theft) via Bayesian posterior ranking. | Section 173/193 BNSS Charge Sheet Drafting |
+| **F05** | **Confidence Meter** | Calibrated Bayesian evidentiary health score and conformal prediction uncertainty intervals guaranteeing factual grounding. | Proof Beyond Reasonable Doubt Standard |
+| **F06** | **Golden Hours Action Center** | Time-critical emergency response during the first 24–48 hours; auto-generates 9 immediate bank freeze and tower preservation orders. | NCRP 1930 / MHA Golden Hours SOP |
+| **F07** | **Crime Script Matcher** | Modus Operandi (MO) fingerprinting against 6 formal cybercrime playbooks (Digital Arrest, KYC Phishing, Mule Layering, etc.). | BNS 2023 (Impersonation & Cheating) |
+| **F08** | **What-If Freeze Simulator** | Counterfactual graph sandbox simulating node freezes to forecast financial bleed reduction and cut off laundering exit routes. | Section 106 BNSS (Attachment of Proceeds) |
+| **F09** | **Legal Compliance Shield** | End-to-end statutory checklist validator generating exportable Section 63 BSA certificates and Section 193 BNSS charge sheet annexures. | Bharatiya Sakshya Adhiniyam, 2023 |
+| **F10** | **Crime Timeline Player** | Dynamic step-by-step temporal graph replay ($\tau$-windowing) synchronizing phone calls, chat threats, and bank debits. | Courtroom Visual Evidence & IO Briefing |
+| **F11** | **Training Simulator** | Interactive scenario training drills evaluating junior cyber officers on speed, accuracy, legal compliance, and action urgency. | National Police Academy Cyber Curriculum |
+
+---
+
+## 📊 Scale & Engineering Validation Scorecard
+
+NETRA 5.0 has undergone a 6-stage engineering validation pass with **100% certified checkpoints**:
 
 ```
-                                  ┌─────────────────────────────────────────┐
-                                  │       UNSTRUCTURED EVIDENCE DATA        │
-                                  │  CDRs • WhatsApp Exports • Bank PDFs    │
-                                  └────────────────────┬────────────────────┘
-                                                       │
-                                                       ▼
-                                  ┌─────────────────────────────────────────┐
-                                  │        PARSER & INGESTION LAYER         │
-                                  │ Multi-format Parsers + Tesseract OCR    │
-                                  └────────────────────┬────────────────────┘
-                                                       │
-                                                       ▼
-                                  ┌─────────────────────────────────────────┐
-                                  │       AI & CORRELATION PIPELINE         │
-                                  │ ├─ CyberDrishtiLM / HingBERT NER        │
-                                  │ ├─ Regex Hard-ID Extractors (11 types)  │
-                                  │ ├─ 6-Metric Hidden Link Graph Engine   │
-                                  │ └─ Local Ollama RAG Copilot             │
-                                  └────────────────────┬────────────────────┘
-                                                       │
-                                                       ▼
-                                  ┌─────────────────────────────────────────┐
-                                  │       STORAGE & INTEGRITY LAYER         │
-                                  │ PostgreSQL (pgvector) • SHA-256 Chain   │
-                                  └────────────────────┬────────────────────┘
-                                                       │
-                                                       ▼
-                                  ┌─────────────────────────────────────────┐
-                                  │        INTERACTIVE FRONTEND UI          │
-                                  │ Next.js 14 • React Flow Canvas • Zustand│
-                                  └─────────────────────────────────────────┘
+╔═══════════════════════════════════════════════════════════════════════════════════════╗
+║                 NETRA 5.0 RELEASE CANDIDATE (RC1) VALIDATION METRICS                  ║
+╠══════════════════════════════════════════════════╦═══════════════╦════════════════════╣
+║ Benchmark Dimension                              ║ Measured Telemetry            ║ Certified Status   ║
+╠══════════════════════════════════════════════════╬═══════════════╬════════════════════╣
+║ Large-Case Stress Ingestion (12 Files)           ║ 18,363 Events / 1,739 Entities║ ✅ 82.14s (Pass)   ║
+║ Canonical Entity Firewall Precision              ║ 0 Fabricated / Duplicates     ║ ✅ 100% Precision  ║
+║ Sustained API Throughput (25 Concurrent Workers) ║ 81.68 req/s (250 Requests)    ║ ✅ 0.00% 5xx Errors║
+║ Cross-Case Blind Index Search (50 Active Cases)  ║ 61.48ms (8 Syndicates Clustered)║ ✅ 0 Deadlocks   ║
+║ Database Orphan Records Audit (8 Child Tables)   ║ 0 Orphaned Records Found      ║ ✅ ACID Safe       ║
+║ Global Audit Chain Recomputation (1,472 Entries) ║ 27.66ms Verification Time     ║ ✅ Cryptographically Sealed║
+║ Automated Test Suite                             ║ 294 / 294 Test Items Passing  ║ ✅ 100% Green      ║
+╚══════════════════════════════════════════════════╩═══════════════╩════════════════════╝
 ```
 
 ---
 
-## 📦 Tech Stack
-
-| Domain | Technologies |
-| :--- | :--- |
-| **Backend Framework** | Python 3.10+, FastAPI, Pydantic v2, Uvicorn |
-| **Database & Cache** | PostgreSQL 16 (pgvector), SQLAlchemy ORM, Redis 7 |
-| **Machine Learning** | PyTorch, HuggingFace Transformers, Scikit-Learn, NetworkX, sklearn-crfsuite |
-| **Local LLM / RAG** | Ollama (`llama3.2:1b`), ChromaDB vector store |
-| **Document Processing** | PyPDF2, Tabula, Tesseract OCR, Jinja2, WeasyPrint |
-| **Frontend Framework** | Next.js 14 (App Router), TypeScript, React 18 |
-| **UI Components** | React Flow (Interactive Canvas), Framer Motion, TailwindCSS, Lucide Icons |
-| **State & API** | Zustand (Global State), Axios, TanStack Query |
-| **DevOps & Container** | Docker, Docker Compose |
-
----
-
-## 🛠️ Repository Structure
-
-```
-cyberdrishti-ai/
-├── backend/
-│   ├── main.py                     # FastAPI main entrypoint & lifespan setup
-│   ├── config.py                   # Central settings & Pydantic config
-│   ├── .env.example                # Sample environment variables
-│   ├── db/                         # Database models, ORM & sessions
-│   ├── routes/                     # API endpoint handlers (cases, graph, evidence, copilot, etc.)
-│   ├── parsers/                    # Multi-format parsers (WhatsApp, CDR, Bank PDF, OCR)
-│   ├── nlp/                        # CyberDrishtiLM model, tokenizer, trainer, HingBERT
-│   ├── graph/                      # NetworkX graph builder & hidden link engine
-│   ├── rag/                        # Ollama RAG copilot & statutory citation validator
-│   └── report/                     # Section 65B PDF certificate generator
-├── frontend/
-│   ├── src/app/                    # Next.js App Router (14 interactive screens)
-│   ├── src/components/             # UI components, layout, & React Flow graph canvas
-│   ├── src/stores/                 # Zustand state management
-│   ├── src/lib/                    # API client & utility functions
-│   ├── .env.example                # Sample frontend env config
-│   └── tailwind.config.ts          # Modern dark/glassmorphic design system
-├── docs/                           # Technical documentation & architectural specs
-│   ├── ARCHITECTURE.md             # Deep-dive system architecture
-│   ├── GETTING_STARTED.md          # Comprehensive setup guide
-│   ├── COMMANDS.md                 # CLI & API reference
-│   ├── DEVELOPMENT.md              # Contributor guidelines
-│   ├── PROJECT_STRUCTURE.md        # File & component breakdown
-│   └── TRAINING_STATUS.md          # Model metrics & evaluation reports
-├── docker-compose.yml              # One-command orchestration
-└── quickstart.ps1                  # Windows PowerShell quick setup script
-```
-
----
-
-## 🚀 Quick Start Guide
+## 🛠️ Quickstart Deployment Guide
 
 ### Prerequisites
-- **Python**: `3.10` or higher
-- **Node.js**: `18.x` or higher
-- **Docker & Docker Compose** (Recommended)
-- **Ollama**: (Optional, for local AI copilot chat)
+- Docker 24+ and Docker Compose v2
+- Host OS: Ubuntu 22.04 / 24.04 LTS, RHEL 9, Debian 12, or macOS
 
----
-
-### Option A: Running via Docker (Recommended)
-
-1. **Clone the Repository**
-   ```bash
-   git clone https://github.com/shubhamrana2662/NETRA.git
-   cd NETRA
-   ```
-
-2. **Setup Environment Variables**
-   ```bash
-   cp backend/.env.example backend/.env
-   cp frontend/.env.example frontend/.env.local
-   ```
-
-3. **Launch All Services**
-   ```bash
-   docker-compose up --build
-   ```
-   - **Frontend**: Access at `http://localhost:3000`
-   - **Backend API Docs**: Access Swagger UI at `http://localhost:8000/docs`
-
----
-
-### Option B: Local Manual Setup
-
-#### 1. Backend Setup
+### Step 1: Clone and Configure Environment
 ```bash
-cd backend
-
-# Create & activate virtual environment
-python -m venv venv
-# On Windows:
-.\venv\Scripts\activate
-# On Linux/macOS:
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Copy environment file
-cp .env.example .env
-
-# Run FastAPI backend
-uvicorn main:app --reload --port 8000
+git clone https://github.com/police-department/netra5.0.git
+cd netra5.0
+cp .env.example .env.production
+# Secure permissions
+chmod 600 .env.production
 ```
 
-#### 2. Frontend Setup
+### Step 2: Launch via Docker Compose
 ```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Copy environment file
-cp .env.example .env.local
-
-# Start Next.js development server
-npm run dev
+docker compose -f docker-compose.yml up -d --build
 ```
 
----
-
-## 🖥️ Screen & Module Overview
-
-| Module / Screen | Description & Capability |
-| :--- | :--- |
-| **1. Executive Dashboard** | Real-time case metrics, active threats, suspicious link alerts, and operational stats. |
-| **2. Case Management** | Case creation, officer assignment, priority tracking, and evidence summary. |
-| **3. Entity Link Graph** | Interactive React Flow network canvas showcasing suspect relationships & hidden link predictions. |
-| **4. Case Timeline** | Multi-source chronological event reconstruction with temporal filtering. |
-| **5. Communications** | Parsed call logs, SMS, and Hinglish WhatsApp chat analysis with NER entity highlighting. |
-| **6. Financial Transactions**| Bank statement analysis, mule account velocity tracking, and high-value flow detection. |
-| **7. Evidence Ingestion** | Drag-and-drop file uploader supporting WhatsApp TXT, Bank PDFs, CDR CSVs, and images. |
-| **8. RAG AI Copilot** | Contextual natural language assistant with grounded legal statutory citations. |
-| **9. Section 65B Reports** | Automated court-admissible PDF certificate generation with cryptographic verification tables. |
-| **10. Audit Chain** | Tamper-evident SHA-256 hash log inspector for chain-of-custody compliance. |
+### Step 3: Verify Running Services
+```bash
+docker compose ps
+curl -s http://localhost:8000/health | jq .
+```
+Open your browser at `http://localhost:3000` to access the NETRA 5.0 Investigative Workstation.
 
 ---
 
-## 🔐 Security & Legal Compliance
+## 📚 Technical Documentation & Resources
 
-- 🔒 **100% Air-Gapped & On-Premise Support**: CyberDrishti AI executes completely on local hardware. Sensitive law enforcement evidence never hits commercial cloud APIs.
-- ⚖️ **Section 65B Admissibility**: Conforms with Section 65B of the Indian Evidence Act (and Section 63 of Bharatiya Sakshya Adhiniyam, 2023) by certifying computer output integrity via SHA-256 hash logs.
-- 🔑 **Role-Based Access Control (RBAC)**: JWT authentication ensures only authorized investigating officers access assigned case files.
-
----
-
-## 📑 Additional Documentation
-
-For detailed technical specifications, explore the guides in the [`docs/`](./docs/) directory:
-- [🏗️ System Architecture Specs](./docs/ARCHITECTURE.md)
-- [🏁 Detailed Getting Started Guide](./docs/GETTING_STARTED.md)
-- [💻 Command & API Reference](./docs/COMMANDS.md)
-- [📊 Model Performance & Training Status](./docs/TRAINING_STATUS.md)
+- 📖 **Operations Runbook**: [docs/DEPLOYMENT_RUNBOOK.md](docs/DEPLOYMENT_RUNBOOK.md) — Production setup, OS kernel tuning, hot backups, and disaster recovery.
+- 📈 **Scale Benchmark Report**: [docs/SCALE_BENCHMARK_REPORT.md](docs/SCALE_BENCHMARK_REPORT.md) — Empirical telemetry from large-case stress tests and 50-case concurrency matrix.
+- 🏛️ **System Architecture**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Full-stack topology, Nginx reverse proxy, and multi-tenant security boundaries.
+- 🧠 **Cognitive Architecture**: [docs/COGNITIVE_ARCHITECTURE.md](docs/COGNITIVE_ARCHITECTURE.md) — Deep dive into the 11 investigation capabilities, probabilistic models, and epistemic guarantees.
+- 🕵️ **Investigator's Journey**: [docs/INVESTIGATOR_JOURNEY_LARGE_CASE.md](docs/INVESTIGATOR_JOURNEY_LARGE_CASE.md) — Step-by-step case study of Inspector Sen solving "Operation Meridian" (18,363 events).
+- 🎙️ **Demo Narrative & Pitch Script**: [docs/DEMO_NARRATIVE.md](docs/DEMO_NARRATIVE.md) — Timed 4-minute presentation script and Q&A defense sheet for evaluations.
 
 ---
 
-<p align="center">
-  <b>Built for Hackathons & Future Law Enforcement Innovation</b><br/>
-  <i>CyberDrishti AI — Illuminating Hidden Links in Cyber Crime Intelligence</i>
-</p>
+## ⚖️ Legal & Statutory Compliance Notice
+
+NETRA 5.0 is designed strictly to assist certified law enforcement personnel. All analytical outputs, behavioral anomaly alerts, and crime script matches are evidentiary drafts requiring physical Investigating Officer (IO) verification, attestation, and signature prior to court submission in compliance with Section 63 of the Bharatiya Sakshya Adhiniyam, 2023.

@@ -26,6 +26,18 @@
           "dormant": ">= 60",
           "active": "< 60"
         }
+      },
+      "device_sharing_count": {
+        "buckets": {
+          "high": ">= 3",
+          "low": "< 3"
+        }
+      },
+      "turnover_volume_inr": {
+        "buckets": {
+          "large": ">= 100000",
+          "small": "< 100000"
+        }
       }
     }
   },
@@ -33,17 +45,27 @@
     {
       "label": "KINGPIN_ORGANIZER",
       "description": "Operates the scheme; originates instructions; funds move through others' accounts.",
-      "prior": 0.3333
+      "prior": 0.2000
     },
     {
       "label": "LAYER1_MULE",
       "description": "Rented/sold account; fast pass-through of victim funds to downstream layers.",
-      "prior": 0.3333
+      "prior": 0.2000
     },
     {
       "label": "COMPROMISED_VICTIM",
       "description": "Genuine account owner whose credentials/account were misused.",
-      "prior": 0.3334
+      "prior": 0.2000
+    },
+    {
+      "label": "TECHNICAL_OPERATOR",
+      "description": "Operates technical infrastructure, call spoofing, botnets, or phishing portals.",
+      "prior": 0.2000
+    },
+    {
+      "label": "BENEFICIARY_CASHOUT",
+      "description": "Final cash withdrawal, crypto swap, or gold purchase nexus.",
+      "prior": 0.2000
     }
   ],
   "indicators": [
@@ -52,19 +74,25 @@
       "observation_key": "velocity_minutes",
       "evidence": {
         "fast": {
-          "KINGPIN_ORGANIZER": 0.1,
-          "LAYER1_MULE": 0.8,
-          "COMPROMISED_VICTIM": 0.1
+          "LAYER1_MULE": 0.65,
+          "BENEFICIARY_CASHOUT": 0.15,
+          "COMPROMISED_VICTIM": 0.10,
+          "KINGPIN_ORGANIZER": 0.05,
+          "TECHNICAL_OPERATOR": 0.05
         },
         "medium": {
-          "KINGPIN_ORGANIZER": 0.3,
-          "LAYER1_MULE": 0.45,
-          "COMPROMISED_VICTIM": 0.25
+          "LAYER1_MULE": 0.35,
+          "BENEFICIARY_CASHOUT": 0.25,
+          "KINGPIN_ORGANIZER": 0.20,
+          "COMPROMISED_VICTIM": 0.10,
+          "TECHNICAL_OPERATOR": 0.10
         },
         "slow": {
-          "KINGPIN_ORGANIZER": 0.4,
-          "LAYER1_MULE": 0.05,
-          "COMPROMISED_VICTIM": 0.55
+          "COMPROMISED_VICTIM": 0.45,
+          "KINGPIN_ORGANIZER": 0.30,
+          "TECHNICAL_OPERATOR": 0.15,
+          "BENEFICIARY_CASHOUT": 0.07,
+          "LAYER1_MULE": 0.03
         }
       },
       "note": "Pass-through within minutes is the classic mule signature."
@@ -74,14 +102,18 @@
       "observation_key": "account_age_days",
       "evidence": {
         "fresh": {
-          "KINGPIN_ORGANIZER": 0.15,
-          "LAYER1_MULE": 0.65,
-          "COMPROMISED_VICTIM": 0.2
+          "LAYER1_MULE": 0.55,
+          "BENEFICIARY_CASHOUT": 0.20,
+          "COMPROMISED_VICTIM": 0.10,
+          "TECHNICAL_OPERATOR": 0.10,
+          "KINGPIN_ORGANIZER": 0.05
         },
         "established": {
-          "KINGPIN_ORGANIZER": 0.35,
-          "LAYER1_MULE": 0.15,
-          "COMPROMISED_VICTIM": 0.5
+          "COMPROMISED_VICTIM": 0.40,
+          "KINGPIN_ORGANIZER": 0.30,
+          "TECHNICAL_OPERATOR": 0.15,
+          "LAYER1_MULE": 0.08,
+          "BENEFICIARY_CASHOUT": 0.07
         }
       },
       "note": "Mule accounts are typically opened shortly before use."
@@ -91,14 +123,18 @@
       "observation_key": "inbound_victim_calls",
       "evidence": {
         "many": {
-          "KINGPIN_ORGANIZER": 0.75,
-          "LAYER1_MULE": 0.15,
-          "COMPROMISED_VICTIM": 0.1
+          "KINGPIN_ORGANIZER": 0.55,
+          "TECHNICAL_OPERATOR": 0.25,
+          "LAYER1_MULE": 0.08,
+          "COMPROMISED_VICTIM": 0.07,
+          "BENEFICIARY_CASHOUT": 0.05
         },
         "few": {
-          "KINGPIN_ORGANIZER": 0.15,
-          "LAYER1_MULE": 0.4,
-          "COMPROMISED_VICTIM": 0.45
+          "LAYER1_MULE": 0.35,
+          "BENEFICIARY_CASHOUT": 0.30,
+          "COMPROMISED_VICTIM": 0.20,
+          "KINGPIN_ORGANIZER": 0.08,
+          "TECHNICAL_OPERATOR": 0.07
         }
       },
       "note": "Multiple victims calling the same number indicates an operator, not a mule."
@@ -108,17 +144,63 @@
       "observation_key": "dormancy_before_crime_days",
       "evidence": {
         "dormant": {
-          "KINGPIN_ORGANIZER": 0.2,
-          "LAYER1_MULE": 0.45,
-          "COMPROMISED_VICTIM": 0.35
+          "LAYER1_MULE": 0.35,
+          "COMPROMISED_VICTIM": 0.25,
+          "BENEFICIARY_CASHOUT": 0.20,
+          "KINGPIN_ORGANIZER": 0.10,
+          "TECHNICAL_OPERATOR": 0.10
         },
         "active": {
-          "KINGPIN_ORGANIZER": 0.35,
-          "LAYER1_MULE": 0.2,
-          "COMPROMISED_VICTIM": 0.45
+          "COMPROMISED_VICTIM": 0.30,
+          "KINGPIN_ORGANIZER": 0.25,
+          "TECHNICAL_OPERATOR": 0.20,
+          "LAYER1_MULE": 0.15,
+          "BENEFICIARY_CASHOUT": 0.10
         }
       },
-      "note": "Weakly diagnostic on its own."
+      "note": "Weakly diagnostic on its own, but reinforces sudden activation of dormant accounts."
+    },
+    {
+      "name": "device_dispersion",
+      "observation_key": "device_sharing_count",
+      "evidence": {
+        "high": {
+          "TECHNICAL_OPERATOR": 0.50,
+          "KINGPIN_ORGANIZER": 0.25,
+          "LAYER1_MULE": 0.15,
+          "BENEFICIARY_CASHOUT": 0.08,
+          "COMPROMISED_VICTIM": 0.02
+        },
+        "low": {
+          "COMPROMISED_VICTIM": 0.40,
+          "BENEFICIARY_CASHOUT": 0.25,
+          "LAYER1_MULE": 0.20,
+          "KINGPIN_ORGANIZER": 0.10,
+          "TECHNICAL_OPERATOR": 0.05
+        }
+      },
+      "note": "Multiple accounts multiplexed on the same device or IP indicates technical operational infrastructure."
+    },
+    {
+      "name": "turnover_scale",
+      "observation_key": "turnover_volume_inr",
+      "evidence": {
+        "large": {
+          "KINGPIN_ORGANIZER": 0.35,
+          "BENEFICIARY_CASHOUT": 0.30,
+          "LAYER1_MULE": 0.25,
+          "TECHNICAL_OPERATOR": 0.07,
+          "COMPROMISED_VICTIM": 0.03
+        },
+        "small": {
+          "COMPROMISED_VICTIM": 0.45,
+          "LAYER1_MULE": 0.25,
+          "TECHNICAL_OPERATOR": 0.15,
+          "BENEFICIARY_CASHOUT": 0.10,
+          "KINGPIN_ORGANIZER": 0.05
+        }
+      },
+      "note": "High aggregate throughput refutes minor compromised victim status."
     }
   ]
 }

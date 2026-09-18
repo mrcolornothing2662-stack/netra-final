@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import AuditLog, Case, User, EvidenceFile, EvidenceEvent, Entity, EntityMention, Correlation
+from db.models import AuditLog, Case, User, EvidenceFile, EvidenceEvent, Entity, EntityMention, Correlation, InvestigationFinding, Relationship
 from db.session import get_db
 from routes.auth import get_current_user, require_role
 from routes.case_access import require_case_access
@@ -83,35 +83,22 @@ class CaseOut(BaseModel):
 # ── Audit helper ──────────────────────────────────────────────────────────────
 
 async def _audit(db: AsyncSession, user: User, action: str, resource_id: str, details: dict):
-    """Append a tamper-evident audit log entry."""
-    if db.bind and db.bind.dialect.name == "postgresql":
-        await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('cyberdrishti:audit-chain'))"))
-    # Get previous hash
-    prev = await db.execute(
-        select(AuditLog.entry_hash).order_by(AuditLog.id.desc()).limit(1).with_for_update()
-    )
-    prev_hash = prev.scalar_one_or_none() or "0" * 64
+    """Append a tamper-evident audit log entry via the canonical writer.
 
-    event_timestamp = datetime.now(timezone.utc)
-    entry_data = json.dumps({
-        "action": action, "user_id": str(user.id),
-        "resource_id": resource_id, "details": details,
-        "timestamp": event_timestamp.isoformat(),
-    }, sort_keys=True)
+    Delegates to utils.audit.append_audit so there is exactly ONE audit-writer
+    implementation (previously this file duplicated the hashing logic). The
+    canonical writer also serializes appends under a Postgres advisory lock.
+    """
+    from utils.audit import append_audit
 
-    entry_hash = hashlib.sha256((prev_hash + entry_data).encode()).hexdigest()
-
-    log = AuditLog(
-        prev_hash=prev_hash,
-        entry_hash=entry_hash,
-        user_id=user.id,
+    await append_audit(
+        db,
         action=action,
         resource_type="case",
         resource_id=resource_id,
-        details_json=details,
-        event_timestamp=event_timestamp,
+        details=details,
+        user_id=str(user.id),
     )
-    db.add(log)
 
 
 def _gen_case_number() -> str:
@@ -244,13 +231,12 @@ async def delete_case(
     c = await require_case_access(db, current, case_id, write=True)
     case_uuid = c.id
 
-    # Cascade delete child records to prevent foreign key constraint violations
+    # Cascade delete child records using direct indexed case_id lookups
+    await db.execute(delete(Relationship).where(Relationship.case_id == case_uuid))
+    await db.execute(delete(InvestigationFinding).where(InvestigationFinding.case_id == case_uuid))
     await db.execute(delete(Correlation).where(Correlation.case_id == case_uuid))
-    await db.execute(delete(EntityMention).where(EntityMention.evidence_event_id.in_(
-        select(EvidenceEvent.id).where(EvidenceEvent.case_id == case_uuid)
-    )))
-    await db.execute(delete(Entity).where(Entity.case_id == case_uuid))
     await db.execute(delete(EvidenceEvent).where(EvidenceEvent.case_id == case_uuid))
+    await db.execute(delete(Entity).where(Entity.case_id == case_uuid))
     await db.execute(delete(EvidenceFile).where(EvidenceFile.case_id == case_uuid))
 
     await _audit(db, current, "CASE_DELETED", str(case_uuid), {"title": c.title})

@@ -1,0 +1,55 @@
+{
+  "connection_pool": {
+    "pool_size": 25,
+    "max_overflow": 50,
+    "pre_ping_active": true,
+    "concurrent_sessions_tested": 35,
+    "duration_seconds": 0.083,
+    "zero_leaks_verified": true
+  },
+  "transaction_atomicity": {
+    "fault_injection_caught": true,
+    "zero_partial_records": true,
+    "acid_atomicity_enforced": true
+  },
+  "cascade_safety": {
+    "deletion_duration_ms": 37.66,
+    "child_tables_verified": [
+      "EvidenceFile",
+      "EvidenceEvent",
+      "Entity",
+      "EntityMention",
+      "Relationship"
+    ],
+    "clean_prune_verified": true
+  },
+  "orphan_audit": {
+    "total_orphans_found": 0,
+    "tables_screened": 8,
+    "details": {
+      "Orphaned Entity Mentions (missing entity)": 0,
+      "Orphaned Entity Mentions (missing event)": 0,
+      "Orphaned Relationships (missing case)": 0,
+      "Orphaned Entities (missing case)": 0,
+      "Orphaned Evidence Events (missing case)": 0,
+      "Orphaned Evidence Files (missing case)": 0,
+      "Orphaned Findings (missing case)": 0,
+      "Orphaned Correlations (missing case)": 0
+    }
+  },
+  "backup_snapshot": {
+    "file_path": "/Users/shubhamrana/netra5.0/scratch/netra5_backup_snapshot.sql",
+    "file_size_bytes": 370148617,
+    "sha256": "5f8cc4dae86fb5a6a62751a9a2fa23f35439b8035638d23a9f48f99d5b2b3cd8",
+    "generation_seconds": 1.53,
+    "tables_verified": [
+      "cases",
+      "entities",
+      "evidence_events",
+      "audit_log"
+    ]
+  },
+  "total_duration_seconds": 2.47,
+  "checkpoints_passed": 24,
+  "total_checkpoints": 24
+}

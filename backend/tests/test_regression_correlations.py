@@ -36,13 +36,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Isolate ALL state to a temp dir BEFORE importing the app (config captures env
 # at import; UPLOAD_DIR is read at module import). DEBUG=false silences echo.
 _TMP = pathlib.Path(tempfile.mkdtemp(prefix="corr_reg_"))
-os.environ["DEBUG"]                  = "false"
-os.environ["DATABASE_URL"]           = f"sqlite+aiosqlite:///{_TMP / 'corr.db'}"
-os.environ["UPLOAD_DIR"]             = str(_TMP / "uploads")
-os.environ["CHROMA_PERSIST_DIR"]     = str(_TMP / "chroma")
-os.environ["INITIAL_ADMIN_USERNAME"] = "admin"
-os.environ["INITIAL_ADMIN_PASSWORD"] = "admin123"
-(_TMP / "uploads").mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("DEBUG", "false")
+os.environ.setdefault("DATABASE_URL", f"sqlite+aiosqlite:///{_TMP / 'corr.db'}")
+os.environ.setdefault("UPLOAD_DIR", str(_TMP / "uploads"))
+os.environ.setdefault("CHROMA_PERSIST_DIR", str(_TMP / "chroma"))
+os.environ.setdefault("INITIAL_ADMIN_USERNAME", "admin")
+os.environ.setdefault("INITIAL_ADMIN_PASSWORD", "admin123")
+pathlib.Path(os.environ["UPLOAD_DIR"]).mkdir(parents=True, exist_ok=True)
 
 import asyncio  # noqa: E402
 
@@ -90,6 +90,8 @@ def test_correlation_verify_uuid_coercion_and_decision_mapping():
 async def _impl():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await main._ensure_audit_genesis()
+    await main._ensure_admin_seed()
 
     transport = httpx.ASGITransport(app=main.app, raise_app_exceptions=False)
     async with httpx.AsyncClient(transport=transport, base_url="http://corr.test") as client:

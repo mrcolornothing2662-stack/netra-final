@@ -229,20 +229,57 @@ export function EvidenceTab({ caseId }: { caseId: string }) {
               {selected.notes ?? "Acquired in accordance with Section 63 BSA 2023. Bitstream digital duplicate generated upon collection."}
             </p>
 
-            {(selected as any).variant_note && (
+            {((selected as any).variant_note || selected.variant_details) && (
               <div style={{
                 marginBottom: "var(--space-6)",
-                padding: "10px 14px",
+                padding: "12px 16px",
                 background: "rgba(245, 158, 11, 0.08)",
                 border: "1px solid rgba(245, 158, 11, 0.25)",
-                borderRadius: "var(--radius-input)",
+                borderRadius: "var(--radius-card)",
               }}>
-                <div style={{ font: "var(--type-mono-xs)", color: "var(--warning)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: "4px" }}>
-                  Feature 01 · Resilient Fingerprint Variant Detected
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                  <div style={{ font: "var(--type-mono-xs)", color: "var(--warning)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                    F01 · Document Version Lineage (v{selected.version_number || 2})
+                  </div>
+                  {selected.variant_details?.containment && (
+                    <span style={{ font: "var(--type-mono-xs)", color: "var(--text-muted)" }}>
+                      {Math.round(selected.variant_details.containment * 100)}% Containment
+                    </span>
+                  )}
                 </div>
-                <div style={{ font: "var(--type-body-sm)", color: "var(--text-secondary)" }}>
-                  {(selected as any).variant_note}
+                <div style={{ font: "var(--type-body-sm)", color: "var(--text-secondary)", marginBottom: "8px" }}>
+                  {(selected as any).variant_note || `Variant of ${selected.variant_details?.parent_name || "parent document"}`}
                 </div>
+                {selected.variant_details?.diff && (
+                  <div style={{ display: "flex", gap: "12px", font: "var(--type-mono-xs)", color: "var(--text-muted)" }}>
+                    <span style={{ color: "var(--verified)" }}>+{selected.variant_details.diff.added_rows ?? selected.variant_details.added_row_count ?? 0} added</span>
+                    <span>·</span>
+                    <span>{selected.variant_details.diff.unchanged_rows ?? selected.variant_details.unchanged_row_count ?? 0} unchanged</span>
+                    <span>·</span>
+                    <span style={{ color: "var(--critical)" }}>-{selected.variant_details.diff.removed_rows ?? selected.variant_details.removed_row_count ?? 0} removed</span>
+                  </div>
+                )}
+                {selected.variant_details?.impact?.new_entities && selected.variant_details.impact.new_entities.length > 0 && (
+                  <div style={{ marginTop: "8px", borderTop: "1px dashed rgba(245, 158, 11, 0.2)", paddingTop: "8px" }}>
+                    <div style={{ font: "var(--type-mono-xs)", color: "var(--text-primary)", marginBottom: "4px" }}>
+                      Introduced Entities ({selected.variant_details.impact.new_entities.length}):
+                    </div>
+                    <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                      {selected.variant_details.impact.new_entities.map((e: any) => (
+                        <span key={e.id} style={{
+                          fontSize: "11px",
+                          padding: "2px 6px",
+                          background: "var(--surface-2)",
+                          borderRadius: "4px",
+                          border: "1px solid var(--line)",
+                          fontFamily: "var(--font-mono)",
+                        }}>
+                          [{e.entity_type}] {e.canonical_value}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -292,6 +329,17 @@ function EvidenceCardItem({ evidence, onSelect }: { evidence: Evidence; onSelect
           <span className="t-mono-xs" style={{ color: "var(--text-muted)" }}>{evidence.id}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <span style={{
+            fontSize: "10px",
+            padding: "1px 6px",
+            borderRadius: "4px",
+            background: "rgba(59, 130, 246, 0.12)",
+            color: "var(--accent)",
+            border: "1px solid rgba(59, 130, 246, 0.25)",
+            fontFamily: "var(--font-mono)",
+          }}>
+            v{evidence.version_number || 1}
+          </span>
           {isVariant && (
             <span style={{
               fontSize: "10px",

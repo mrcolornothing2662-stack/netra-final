@@ -378,4 +378,42 @@ python -c "from parsers.whatsapp_parser import parse_whatsapp; print(parse_whats
 
 ---
 
+## 🧪 Canonical Verification & Audit Harnesses
+
+Both SQLite and PostgreSQL 16 dialect runs are verified and fully supported.
+
+### 1. SQLite In-Memory / Temp Database (Self-cleaning)
+```bash
+cd backend
+python _feature_audit.py        # 49/49 features passed
+python _shadow_mule_e2e.py      # 19/19 checks passed
+pytest tests -v                 # 24/24 passed
+python scripts/check_migrations.py # Migration sync guard
+```
+
+### 2. PostgreSQL 16 Canonical Verification (Dedicated Audit DB)
+```bash
+# A. Provision isolated audit database (one-time setup):
+PGPASSWORD=cyberdrishti_secret psql -h 127.0.0.1 -U cyberdrishti -d postgres -c "CREATE DATABASE cyberdrishti_audit_dev OWNER cyberdrishti;"
+
+# B. Run database migrations on PostgreSQL:
+DATABASE_URL="postgresql+asyncpg://cyberdrishti:cyberdrishti_secret@127.0.0.1:5432/cyberdrishti_audit_dev" python -m alembic upgrade head
+
+# C. Run Operation Shadow Mule forensic acceptance test:
+DATABASE_URL="postgresql+asyncpg://cyberdrishti:cyberdrishti_secret@127.0.0.1:5432/cyberdrishti_audit_dev" python _shadow_mule_e2e.py
+
+# D. Run full surface feature audit:
+DATABASE_URL="postgresql+asyncpg://cyberdrishti:cyberdrishti_secret@127.0.0.1:5432/cyberdrishti_audit_dev" python _feature_audit.py
+```
+
+### 3. Database Migration Management (Alembic)
+```bash
+cd backend
+python -m alembic upgrade head           # Apply all migrations to head
+python -m alembic revision --autogenerate -m "<name>"  # Generate new migration
+python scripts/check_migrations.py       # CI guard: verifies models match migrations
+```
+
+---
+
 **📝 Tip:** Bookmark this file for quick reference during development!

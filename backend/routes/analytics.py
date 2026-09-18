@@ -26,7 +26,8 @@ from db.models import (
     Correlation, AuditLog, User
 )
 from db.session import get_db, AsyncSessionLocal
-from routes.auth import get_current_user
+from routes.auth import get_current_user, get_current_user_token_or_header
+from routes.case_access import require_case_access
 
 router = APIRouter()
 intel_router = APIRouter()
@@ -124,6 +125,8 @@ class TransactionRecord(BaseModel):
     flagged: bool = False
     reason: Optional[str] = None
     source_file: Optional[str] = None
+    parse_status: str = "OK"
+    parse_errors: Optional[list[str]] = None
 
 
 class FlowNode(BaseModel):
@@ -243,20 +246,8 @@ async def get_case_summary(
     current: User = Depends(get_current_user),
 ):
     """Returns consolidated case investigation status, progress metrics, and key findings."""
-    case_uuid = _resolve_case_uuid(case_id)
-    if not case_uuid:
-        c_row = (await db.execute(
-            select(Case).where((Case.case_number == case_id) | (Case.title.ilike(f"%{case_id}%")))
-        )).scalars().first()
-        if c_row:
-            case_uuid = c_row.id
-
-    if not case_uuid:
-        raise HTTPException(404, "Case not found")
-
-    case = await db.get(Case, case_uuid)
-    if not case:
-        raise HTTPException(404, "Case not found")
+    case = await require_case_access(db, current, case_id)
+    case_uuid = case.id
 
     # Counts
     ev_count = (await db.execute(
@@ -385,23 +376,11 @@ async def get_case_summary(
 async def get_case_communications(
     case_id: str,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current: User = Depends(get_current_user),
 ):
     """Extracts real Call Detail Records (CDR) and WhatsApp chat transcripts for the case."""
-    case_uuid = _resolve_case_uuid(case_id)
-    if not case_uuid:
-        c_row = (await db.execute(
-            select(Case).where((Case.case_number == case_id) | (Case.title.ilike(f"%{case_id}%")))
-        )).scalars().first()
-        if c_row:
-            case_uuid = c_row.id
-
-    if not case_uuid:
-        return CommunicationsResponse(
-            case_id=case_id, total_calls=0, total_messages=0,
-            unique_numbers=0, suspicious_contacts_count=0,
-            calls=[], messages=[]
-        )
+    case = await require_case_access(db, current, case_id)
+    case_uuid = case.id
 
     # Fetch evidence events
     events = (await db.execute(
@@ -530,23 +509,11 @@ async def get_case_communications(
 async def get_case_transactions(
     case_id: str,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current: User = Depends(get_current_user),
 ):
     """Extracts real bank statement transactions, detects rapid layering, and builds directed flow graph."""
-    case_uuid = _resolve_case_uuid(case_id)
-    if not case_uuid:
-        c_row = (await db.execute(
-            select(Case).where((Case.case_number == case_id) | (Case.title.ilike(f"%{case_id}%")))
-        )).scalars().first()
-        if c_row:
-            case_uuid = c_row.id
-
-    if not case_uuid:
-        return FinancialTrailResponse(
-            case_id=case_id, total_volume=0.0, flagged_volume=0.0,
-            total_transactions=0, unique_accounts=0, mule_accounts_count=0,
-            transactions=[], flow_graph={"nodes": [], "edges": []}
-        )
+    case = await require_case_access(db, current, case_id)
+    case_uuid = case.id
 
     # Fetch bank transaction evidence events
     events = (await db.execute(
@@ -580,6 +547,28 @@ async def get_case_transactions(
         balance = meta.get("balance")
         ref_no = meta.get("ref_no")
         source_doc = file_map.get(ev.evidence_file_id, "Bank Statement")
+
+        # A row the parser could not read reliably is surfaced as PARSE_ERROR —
+        # never normalised into a fabricated amount or counterparty.
+        parse_status = meta.get("parser_status", "OK")
+        parse_errors = meta.get("parse_errors") or []
+        if parse_status == "PARSE_ERROR":
+            transactions.append(TransactionRecord(
+                id=ev_id,
+                timestamp=ev.event_timestamp.isoformat() if ev.event_timestamp else None,
+                narration=narration,
+                debit=None, credit=None, amount=0.0, balance=None,
+                ref_no=ref_no,
+                from_entity="Unparsed", to_entity="Unparsed",
+                method="UNKNOWN",
+                status="parse_error",
+                flagged=True,
+                reason="Parser could not read this transaction reliably",
+                source_file=source_doc,
+                parse_status=parse_status,
+                parse_errors=parse_errors,
+            ))
+            continue
 
         amount = float(credit or debit or 0.0)
         total_vol += amount
@@ -647,6 +636,8 @@ async def get_case_transactions(
             flagged=flagged,
             reason=reason,
             source_file=source_doc,
+            parse_status=parse_status,
+            parse_errors=parse_errors,
         )
         transactions.append(tx_record)
 
@@ -823,7 +814,8 @@ async def cross_match_intel(
 async def stream_case_events(
     case_id: str,
     request: Request,
-    _: User = Depends(get_current_user),
+    db:      AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user_token_or_header),
 ):
     """
     Server-Sent Events channel for a case.
@@ -833,6 +825,10 @@ async def stream_case_events(
     agent actions, or notifications — no fabricated activity events are emitted.
     Real event streaming is a later-sprint concern.
     """
+    # Enforce case access even though the channel is currently ack+heartbeat only
+    # — otherwise it would leak the existence of inaccessible cases.
+    await require_case_access(db, current, case_id)
+
     async def event_generator():
         yield f"event: connected\ndata: {json.dumps({'status': 'connected', 'case_id': case_id})}\n\n"
 
