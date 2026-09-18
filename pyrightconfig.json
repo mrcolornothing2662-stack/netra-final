@@ -1,0 +1,9 @@
+{
+  "include": [
+    "backend"
+  ],
+  "extraPaths": [
+    "backend"
+  ],
+  "pythonPath": "backend/.venv/bin/python"
+}

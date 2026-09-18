@@ -211,11 +211,12 @@ async def run_case_correlations(db: AsyncSession, case: Case) -> dict[str, Any]:
         )
     )).scalars().all()
     rel_map = {(r.source_entity_id, r.target_entity_id): r for r in existing_rels}
+    id_to_entity: dict[str, Entity] = {str(e.id): e for e in entities_db}
 
     for pair, score, component_scores, reasons in high_confidence:
         u, v = pair
-        entity_u = id_to_entity.get(u)
-        entity_v = id_to_entity.get(v)
+        entity_u = canonical_to_entity.get(u) or id_to_entity.get(str(u))
+        entity_v = canonical_to_entity.get(v) or id_to_entity.get(str(v))
         if not entity_u or not entity_v:
             continue
 
@@ -224,7 +225,7 @@ async def run_case_correlations(db: AsyncSession, case: Case) -> dict[str, Any]:
         evidence_ids: list[str] = []
         common = set(G.neighbors(u)) & set(G.neighbors(v))
         for nbr in list(common)[:5]:
-            nbr_ent = id_to_entity.get(nbr)
+            nbr_ent = canonical_to_entity.get(nbr) or id_to_entity.get(str(nbr))
             if not nbr_ent:
                 continue
             events_nbr = (await db.execute(
