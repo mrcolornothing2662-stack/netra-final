@@ -148,3 +148,6 @@ Inspector Sen clicks **Export Statutory Dossier**:
 | **Trial Admissibility (BSA S.63 / BNSS S.105)** | High risk of rejection | **100% Certified** (F02/F05/F09) | **Forensically Sound** |
 
 **Conclusion**: Through NETRA 5.0, a complex interstate cyber-extortion case that would normally take weeks was triaged, connected, fortified, and sealed for prosecution in under **2 hours**.
+
+> **Statutory Notice**: *NETRA produces evidence-grounded, provenance-preserving investigative outputs and statutory verification artifacts; final legal admissibility and investigative decisions remain with the authorized investigator and applicable judicial process.*
+

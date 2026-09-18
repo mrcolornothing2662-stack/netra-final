@@ -3,8 +3,8 @@
 **Presentation Target**: Hackathon Grand Finale / Law Enforcement Evaluation Panel  
 **Target Duration**: 4 Minutes (240 Seconds)  
 **Live UI URL**: `http://localhost:3000` (Backend API: `http://localhost:8000`)  
-**Presenter**: Lead Investigator / Technical Architect  
-**Core Thesis**: NETRA 5.0 is India's first forensically sound, cognitive cyber-investigation workstation—bridging the chasm between raw forensic data and court-admissible trial prosecution under the new criminal laws (BSA & BNSS 2023).
+**Core Thesis**: NETRA 5.0 is India's first forensically sound, cognitive cyber-investigation workstation—bridging the chasm between raw forensic data and statutory trial preparation under the new criminal laws (BSA & BNSS 2023).  
+> **Key Legal Framing**: *"NETRA produces evidence-grounded, provenance-preserving investigative outputs and statutory verification artifacts; final legal admissibility and investigative decisions remain with the authorized investigator and applicable judicial process."*
 
 ---
 
@@ -69,7 +69,7 @@
 |---|---|---|
 | **03:30 - 04:00** | **Screen**: Settings / Audit Log (`/settings`).<br/>*Action*: Click 'Verify Audit Chain'. Show 'VERIFIED: 1,472 entries intact'. | *"NETRA 5.0 is not a prototype; it is an enterprise-grade **Release Candidate (RC1)**:
 • **192 / 192 audit checkpoints passed** across 6 hardening stages.
-• **294 / 294 automated tests green**.
+• **293 passed + 1 expected xfail (294 total test items green)**.
 • Proven on **18,363 real-world events** with 0 deadlocks under 50-case concurrency.
 • Completely containerized with Nginx reverse proxy and OWASP security headers.
 

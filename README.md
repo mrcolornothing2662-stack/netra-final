@@ -109,4 +109,7 @@ Open your browser at `http://localhost:3000` to access the NETRA 5.0 Investigati
 
 ## ⚖️ Legal & Statutory Compliance Notice
 
-NETRA 5.0 is designed strictly to assist certified law enforcement personnel. All analytical outputs, behavioral anomaly alerts, and crime script matches are evidentiary drafts requiring physical Investigating Officer (IO) verification, attestation, and signature prior to court submission in compliance with Section 63 of the Bharatiya Sakshya Adhiniyam, 2023.
+NETRA 5.0 is designed strictly to assist certified law enforcement personnel. **NETRA produces evidence-grounded, provenance-preserving investigative outputs and statutory verification artifacts; final legal admissibility and investigative decisions remain with the authorized investigator and applicable judicial process.**
+
+All analytical outputs, behavioral anomaly alerts, and crime script matches are evidentiary drafts requiring physical Investigating Officer (IO) verification, attestation, and signature prior to court submission in compliance with Section 63 of the Bharatiya Sakshya Adhiniyam, 2023.
+
