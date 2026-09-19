@@ -11,7 +11,7 @@ export const CASE_TABS = [
   { id: "entities", label: "Entities" },
   { id: "network", label: "Network" },
   { id: "timeline", label: "Timeline" },
-  { id: "analysis", label: "Analysis" },
+  { id: "analysis", label: "Copilot" },
   { id: "cognitive", label: "Cognitive" },
   { id: "agent", label: "Agent" },
   { id: "report", label: "Report" },
