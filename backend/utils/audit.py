@@ -56,12 +56,15 @@ async def append_audit(
 
     event_timestamp = datetime.now(timezone.utc)
 
+    user_id_str = str(user_id) if user_id is not None else None
+    resource_id_str = str(resource_id) if resource_id is not None else None
+
     # Canonical JSON for hashing — must match verification logic in audit.py
     entry_data = json.dumps(
         {
             "action":      action,
-            "user_id":     user_id,
-            "resource_id": resource_id,
+            "user_id":     user_id_str,
+            "resource_id": resource_id_str,
             "details":     details,
             "timestamp":   event_timestamp.isoformat(),
         },

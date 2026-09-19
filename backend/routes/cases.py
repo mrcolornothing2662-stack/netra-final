@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import AuditLog, Case, User, EvidenceFile, EvidenceEvent, Entity, EntityMention, Correlation, InvestigationFinding, Relationship
+from db.models import AuditLog, Case, User, EvidenceFile, EvidenceEvent, Entity, EntityMention, Correlation, InvestigationFinding, Relationship, CaseCollaborator
 from db.session import get_db
 from routes.auth import get_current_user, require_role
 from routes.case_access import require_case_access
@@ -80,9 +80,25 @@ class CaseOut(BaseModel):
         )
 
 
-# ── Audit helper ──────────────────────────────────────────────────────────────
+class CollaboratorAdd(BaseModel):
+    user_id: str
+    role: str = "io"  # lead_io, assisting_io, fiu_analyst, observer, supervisor, io
 
-async def _audit(db: AsyncSession, user: User, action: str, resource_id: str, details: dict):
+
+class CollaboratorOut(BaseModel):
+    id: str
+    case_id: str
+    user_id: str
+    username: str | None = None
+    full_name: str | None = None
+    role: str
+    assigned_by: str | None = None
+    created_at: str
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+async def _audit(db: AsyncSession, user: User, action: str, case_id: str, details: dict):
     """Append a tamper-evident audit log entry via the canonical writer.
 
     Delegates to utils.audit.append_audit so there is exactly ONE audit-writer
@@ -92,10 +108,10 @@ async def _audit(db: AsyncSession, user: User, action: str, resource_id: str, de
     from utils.audit import append_audit
 
     await append_audit(
-        db,
+        db=db,
         action=action,
         resource_type="case",
-        resource_id=resource_id,
+        resource_id=case_id,
         details=details,
         user_id=str(user.id),
     )
@@ -117,14 +133,16 @@ async def list_cases(
     db: AsyncSession = Depends(get_db),
     current: User = Depends(get_current_user),
 ):
+    collab_subq = select(CaseCollaborator.case_id).where(CaseCollaborator.user_id == current.id)
     q = select(Case)
     if current.role != "admin":
-        q = q.where(Case.assigned_officer_id == current.id)
+        q = q.where((Case.assigned_officer_id == current.id) | (Case.id.in_(collab_subq)))
     if status:
         q = q.where(Case.status == status)
     if priority:
         q = q.where(Case.priority == priority)
-    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar()
+    q = q.order_by(Case.created_at.desc())
+    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar() or 0
     cases = (await db.execute(q.offset((page - 1) * page_size).limit(page_size))).scalars().all()
 
     return {
@@ -170,7 +188,9 @@ async def case_stats(
     db: AsyncSession = Depends(get_db),
     current: User = Depends(get_current_user),
 ):
-    access_filter = [] if current.role == "admin" else [Case.assigned_officer_id == current.id]
+    collab_subq = select(CaseCollaborator.case_id).where(CaseCollaborator.user_id == current.id)
+    access_filter = [] if current.role == "admin" else [(Case.assigned_officer_id == current.id) | (Case.id.in_(collab_subq))]
+    
     total     = (await db.execute(select(func.count()).select_from(Case).where(*access_filter))).scalar() or 0
     open_c    = (await db.execute(select(func.count()).select_from(Case).where(
         *access_filter, Case.status.in_(["open", "in_progress"])))).scalar() or 0
@@ -244,3 +264,123 @@ async def delete_case(
     return {"status": "success", "message": f"Case {c.case_number} deleted successfully"}
 
 
+# ── Collaborator Endpoints ───────────────────────────────────────────────────
+
+@router.get("/{case_id}/collaborators", response_model=list[CollaboratorOut])
+async def list_case_collaborators(
+    case_id: str,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    c = await require_case_access(db, current, case_id)
+    res = await db.execute(
+        select(CaseCollaborator, User.username, User.full_name)
+        .join(User, CaseCollaborator.user_id == User.id)
+        .where(CaseCollaborator.case_id == c.id)
+        .order_by(CaseCollaborator.created_at)
+    )
+    results = []
+    for collab, uname, fname in res.all():
+        results.append(CollaboratorOut(
+            id=str(collab.id),
+            case_id=str(collab.case_id),
+            user_id=str(collab.user_id),
+            username=uname,
+            full_name=fname,
+            role=collab.role,
+            assigned_by=str(collab.assigned_by) if collab.assigned_by else None,
+            created_at=collab.created_at.isoformat() if collab.created_at else "",
+        ))
+    return results
+
+
+@router.post("/{case_id}/collaborators", response_model=CollaboratorOut, status_code=201)
+async def add_case_collaborator(
+    case_id: str,
+    body: CollaboratorAdd,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(require_role("io", "admin")),
+):
+    c = await require_case_access(db, current, case_id, write=True)
+
+    try:
+        target_uuid = uuid.UUID(str(body.user_id))
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid target user UUID")
+
+    target_user = await db.get(User, target_uuid)
+    if not target_user:
+        raise HTTPException(404, "Target user to add as collaborator not found")
+
+    role_norm = body.role.strip().lower()
+    valid_roles = {"lead_io", "assisting_io", "fiu_analyst", "observer", "supervisor", "io"}
+    if role_norm not in valid_roles:
+        raise HTTPException(400, f"Invalid collaborator role. Allowed: {sorted(list(valid_roles))}")
+
+    existing = (await db.execute(
+        select(CaseCollaborator).where(
+            CaseCollaborator.case_id == c.id,
+            CaseCollaborator.user_id == target_uuid,
+        )
+    )).scalars().first()
+
+    if existing:
+        existing.role = role_norm
+        collab = existing
+    else:
+        collab = CaseCollaborator(
+            case_id=c.id,
+            user_id=target_uuid,
+            role=role_norm,
+            assigned_by=current.id,
+        )
+        db.add(collab)
+
+    await db.flush()
+    await _audit(db, current, "COLLABORATOR_ASSIGNED", str(c.id), {
+        "collaborator_id": str(target_uuid),
+        "username": target_user.username,
+        "role": role_norm,
+    })
+
+    return CollaboratorOut(
+        id=str(collab.id),
+        case_id=str(collab.case_id),
+        user_id=str(collab.user_id),
+        username=target_user.username,
+        full_name=target_user.full_name,
+        role=collab.role,
+        assigned_by=str(collab.assigned_by) if collab.assigned_by else None,
+        created_at=collab.created_at.isoformat() if collab.created_at else datetime.now(timezone.utc).isoformat(),
+    )
+
+
+@router.delete("/{case_id}/collaborators/{collaborator_user_id}")
+async def remove_case_collaborator(
+    case_id: str,
+    collaborator_user_id: str,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(require_role("io", "admin")),
+):
+    c = await require_case_access(db, current, case_id, write=True)
+
+    try:
+        target_uuid = uuid.UUID(str(collaborator_user_id))
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid collaborator user UUID")
+
+    res = await db.execute(
+        select(CaseCollaborator).where(
+            CaseCollaborator.case_id == c.id,
+            CaseCollaborator.user_id == target_uuid,
+        )
+    )
+    collab = res.scalars().first()
+    if not collab:
+        raise HTTPException(404, "Collaborator record not found")
+
+    await db.delete(collab)
+    await _audit(db, current, "COLLABORATOR_REMOVED", str(c.id), {
+        "collaborator_id": str(target_uuid),
+    })
+    return {"status": "success", "message": "Collaborator removed successfully"}
