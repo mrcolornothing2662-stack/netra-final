@@ -44,7 +44,9 @@ from routes.evidence import _classify_and_route_file
 @pytest.fixture
 def file_08_csv_path(tmp_path):
     """Extract File 08 from the synthetic case zip to a temp file."""
-    zip_path = Path("/Users/shubhamrana/Downloads/NETRA_Operation_Meridian_Synthetic_Case.zip")
+    zip_path = Path(__file__).resolve().parent / "fixtures" / "NETRA_Operation_Meridian_Synthetic_Case.zip"
+    if not zip_path.exists():
+        zip_path = Path.home() / "Downloads" / "NETRA_Operation_Meridian_Synthetic_Case.zip"
     if not zip_path.exists():
         pytest.skip("Synthetic case zip not found")
     with zipfile.ZipFile(zip_path, "r") as z:

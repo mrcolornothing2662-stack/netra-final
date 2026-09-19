@@ -38,7 +38,7 @@
     }
   },
   "backup_snapshot": {
-    "file_path": "/Users/shubhamrana/netra5.0/scratch/netra5_backup_snapshot.sql",
+    "file_path": "./scratch/netra5_backup_snapshot.sql",
     "file_size_bytes": 370148617,
     "sha256": "5f8cc4dae86fb5a6a62751a9a2fa23f35439b8035638d23a9f48f99d5b2b3cd8",
     "generation_seconds": 1.53,

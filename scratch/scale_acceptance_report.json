@@ -1,7 +1,7 @@
 {
   "timestamp": "2026-09-18T11:32:10Z",
   "dataset": {
-    "zip_path": "/Users/shubhamrana/netra5.0/NETRA_Large_Synthetic_Case.zip",
+    "zip_path": "./NETRA_Large_Synthetic_Case.zip",
     "zip_size_bytes": 284204
   },
   "ingestion": {

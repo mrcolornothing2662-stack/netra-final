@@ -4,9 +4,11 @@ import os
 import sys
 import uuid
 import itertools
+from pathlib import Path
 
 BASE_URL = 'http://127.0.0.1:8000'
-ZIP_PATH = '/Users/shubhamrana/Downloads/NETRA_Operation_Meridian_Synthetic_Case.zip'
+_fixture_candidate = Path(__file__).resolve().parent / "tests" / "fixtures" / "NETRA_Operation_Meridian_Synthetic_Case.zip"
+ZIP_PATH = str(_fixture_candidate if _fixture_candidate.exists() else Path.home() / "Downloads" / "NETRA_Operation_Meridian_Synthetic_Case.zip")
 
 async def run_test():
     print("=" * 70)
@@ -101,7 +103,7 @@ async def run_test():
         print(f'\n5. [EVENTS] Extracted {len(timeline_events)} timeline evidence events')
 
         # 7. Query Database Directly for Entities, Mentions, and Relationships
-        sys.path.insert(0, '/Users/shubhamrana/netra5.0/backend')
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
         from db.session import AsyncSessionLocal
         from db.models import Entity, EntityMention, Relationship, EvidenceEvent
         from sqlalchemy import select, func

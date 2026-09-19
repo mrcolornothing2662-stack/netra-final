@@ -27,7 +27,9 @@ import zipfile
 import httpx
 
 BASE_URL = "http://127.0.0.1:8000/api/v1"
-ZIP_PATH = "/Users/shubhamrana/Downloads/NETRA_Operation_Meridian_Synthetic_Case.zip"
+from pathlib import Path
+_fixture_candidate = Path(__file__).resolve().parents[1] / "backend" / "tests" / "fixtures" / "NETRA_Operation_Meridian_Synthetic_Case.zip"
+ZIP_PATH = str(_fixture_candidate if _fixture_candidate.exists() else Path.home() / "Downloads" / "NETRA_Operation_Meridian_Synthetic_Case.zip")
 
 
 def main():

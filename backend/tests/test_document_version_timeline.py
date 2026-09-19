@@ -417,6 +417,7 @@ async def test_version_timeline_endpoint_grouping():
             id=case_id,
             case_number="CASE-LINEAGE-API",
             title="Lineage API Test Case",
+            assigned_officer_id=user.id,
         )
         db_session.add(case)
         await db_session.flush()

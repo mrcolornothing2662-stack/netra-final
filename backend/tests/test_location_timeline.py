@@ -30,7 +30,8 @@ from parsers.location_timeline_parser import (
 )
 from routes.evidence import _classify_and_route_file
 
-ZIP_PATH = "/Users/shubhamrana/Downloads/NETRA_Operation_Meridian_Synthetic_Case.zip"
+from pathlib import Path
+ZIP_PATH = str(Path(__file__).resolve().parent / "fixtures" / "NETRA_Operation_Meridian_Synthetic_Case.zip")
 
 
 @pytest.fixture(scope="module")

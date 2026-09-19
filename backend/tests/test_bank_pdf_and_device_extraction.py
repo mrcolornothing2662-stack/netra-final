@@ -9,7 +9,7 @@ import pandas as pd
 from parsers.bank_pdf_parser import parse_bank_pdf, _is_bank_statement_table, _map_columns
 from routes.evidence import _classify_and_route_file, _safe_parse_iso
 
-ZIP_PATH = "/Users/shubhamrana/Downloads/NETRA_Operation_Meridian_Synthetic_Case.zip"
+ZIP_PATH = str(pathlib.Path(__file__).resolve().parent / "fixtures" / "NETRA_Operation_Meridian_Synthetic_Case.zip")
 
 
 def test_bank_pdf_parser_rejects_non_bank_tables():

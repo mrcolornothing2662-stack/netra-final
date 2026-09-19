@@ -35,7 +35,8 @@ from nlp.entity_validation import validate_entity_candidate
 from parsers.seizure_memo_parser import parse_seizure_memo, is_seizure_memo_header
 from routes.evidence import _classify_and_route_file
 
-ZIP_PATH = "/Users/shubhamrana/Downloads/NETRA_Operation_Meridian_Synthetic_Case.zip"
+from pathlib import Path
+ZIP_PATH = str(Path(__file__).resolve().parent / "fixtures" / "NETRA_Operation_Meridian_Synthetic_Case.zip")
 
 
 @pytest.fixture(scope="module")
