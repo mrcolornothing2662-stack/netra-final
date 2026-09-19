@@ -22,6 +22,19 @@ export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
+const REFRESH_KEY = "cyberdrishti_refresh_token";
+
+export function getRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(REFRESH_KEY);
+}
+
+export function setRefreshToken(token: string) {
+  if (typeof window !== "undefined") {
+    localStorage.setItem(REFRESH_KEY, token);
+  }
+}
+
 export function setToken(token: string) {
   if (typeof window !== "undefined") {
     localStorage.setItem(TOKEN_KEY, token);
@@ -31,6 +44,7 @@ export function setToken(token: string) {
 export function clearToken() {
   if (typeof window !== "undefined") {
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(REFRESH_KEY);
     localStorage.removeItem(USER_KEY);
   }
 }
@@ -45,6 +59,10 @@ export interface UserSession {
   unit?: string | null;
   must_change_password?: boolean;
 }
+
+export type LoginResult =
+  | { mfa_required: false; user: UserSession }
+  | { mfa_required: true; mfa_token: string };
 
 export function getStoredUser(): UserSession | null {
   if (typeof window === "undefined") return null;
@@ -101,11 +119,11 @@ function redirectToLogin() {
 }
 
 /**
- * Explicit sign-in. Posts the credential form to /auth/login, stores the JWT,
- * then loads the real identity from /auth/me. Throws ApiError on failure — the
- * login screen surfaces the message; nothing is fabricated.
+ * Explicit sign-in. Posts the credential form to /auth/login.
+ * If the account requires TOTP MFA, returns { mfa_required: true, mfa_token }.
+ * Otherwise stores access and refresh tokens, and loads identity from /auth/me.
  */
-export async function login(username: string, password: string): Promise<UserSession> {
+export async function login(username: string, password: string): Promise<LoginResult> {
   const params = new URLSearchParams({ username, password });
   let res: Response;
   try {
@@ -130,10 +148,17 @@ export async function login(username: string, password: string): Promise<UserSes
   }
 
   const data = await res.json();
+  if (data?.mfa_required) {
+    return { mfa_required: true, mfa_token: String(data.mfa_token) };
+  }
+
   if (!data?.access_token) {
     throw new ApiError("Login failed: no token was issued.", 500);
   }
   setToken(data.access_token);
+  if (data.refresh_token) {
+    setRefreshToken(data.refresh_token);
+  }
 
   let user: UserSession;
   try {
@@ -143,6 +168,53 @@ export async function login(username: string, password: string): Promise<UserSes
     user = {
       id: "",
       username,
+      role: data.role || "io",
+      full_name: data.full_name ?? null,
+      must_change_password: !!data.must_change_password,
+    };
+  }
+  setStoredUser(user);
+  return { mfa_required: false, user };
+}
+
+/** Complete 2-step TOTP MFA authentication challenge. */
+export async function verifyTotpLogin(mfa_token: string, code: string): Promise<UserSession> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/auth/totp/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mfa_token, code: code.trim() }),
+    });
+  } catch {
+    throw new ApiError("Unable to reach the authentication server.", 0);
+  }
+
+  if (!res.ok) {
+    let detail = "Invalid verification code.";
+    try {
+      const d = await res.json();
+      if (d && typeof d === "object" && "detail" in d) detail = String((d as { detail: unknown }).detail);
+    } catch {}
+    throw new ApiError(detail, res.status);
+  }
+
+  const data = await res.json();
+  if (!data?.access_token) {
+    throw new ApiError("Authentication failed: no access token issued.", 500);
+  }
+  setToken(data.access_token);
+  if (data.refresh_token) {
+    setRefreshToken(data.refresh_token);
+  }
+
+  let user: UserSession;
+  try {
+    user = await fetchMe();
+  } catch {
+    user = {
+      id: "",
+      username: "",
       role: data.role || "io",
       full_name: data.full_name ?? null,
       must_change_password: !!data.must_change_password,

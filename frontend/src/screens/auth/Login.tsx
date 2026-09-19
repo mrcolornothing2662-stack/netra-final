@@ -1,7 +1,7 @@
 import { Component, Suspense, lazy, useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { login, isAuthenticated, clearToken, getStoredUser, ApiError } from "../../api/client";
+import { login, verifyTotpLogin, isAuthenticated, clearToken, getStoredUser, ApiError } from "../../api/client";
 import { Icon } from "../../components/icons";
 import { prefersReducedMotion } from "./scene/quality";
 import s from "./login.module.css";
@@ -40,6 +40,8 @@ export function Login() {
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
+  const [totpCode, setTotpCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reducedMotion] = useState(() => prefersReducedMotion());
@@ -51,7 +53,13 @@ export function Login() {
     setSubmitting(true);
     setError(null);
     try {
-      const user = await login(username.trim(), password);
+      const res = await login(username.trim(), password);
+      if (res.mfa_required) {
+        setMfaToken(res.mfa_token);
+        setSubmitting(false);
+        return;
+      }
+      const user = res.user;
       if (user.must_change_password) {
         navigate("/change-password", { replace: true });
       } else {
@@ -59,6 +67,24 @@ export function Login() {
       }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Sign-in failed. Please try again.");
+      setSubmitting(false);
+    }
+  };
+
+  const handleMfaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mfaToken || !totpCode.trim()) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const user = await verifyTotpLogin(mfaToken, totpCode);
+      if (user.must_change_password) {
+        navigate("/change-password", { replace: true });
+      } else {
+        navigate(next, { replace: true });
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Invalid MFA code. Please try again.");
       setSubmitting(false);
     }
   };
@@ -157,6 +183,54 @@ export function Login() {
               Sign In as Different Officer
             </button>
           </div>
+        ) : mfaToken ? (
+          <form onSubmit={handleMfaSubmit} noValidate>
+            <motion.div
+              className={s.field}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4 }}
+            >
+              <label className={s.label} htmlFor="login-totp">Two-Factor Code (TOTP)</label>
+              <input
+                id="login-totp"
+                className={s.input}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={6}
+                placeholder="000000"
+                value={totpCode}
+                onChange={e => setTotpCode(e.target.value.replace(/\D/g, ""))}
+                autoFocus
+                required
+              />
+            </motion.div>
+
+            <motion.button
+              className={s.submit}
+              type="submit"
+              disabled={submitting || totpCode.trim().length !== 6}
+              aria-busy={submitting}
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.985 }}
+            >
+              {submitting ? "VERIFYING CODE" : "VERIFY 2FA CODE"}
+              {!submitting && <Icon name="arrow" size={15} />}
+            </motion.button>
+
+            <button
+              className={s.switchBtn}
+              type="button"
+              onClick={() => {
+                setMfaToken(null);
+                setTotpCode("");
+                setError(null);
+              }}
+            >
+              Back to Officer ID Sign-In
+            </button>
+          </form>
         ) : (
           <form onSubmit={handleSubmit} noValidate>
             <motion.div
