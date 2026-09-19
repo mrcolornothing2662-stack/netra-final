@@ -16,7 +16,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from typing import Any
+import contextlib
+from typing import Any, Generator
 
 from config import settings
 from db.models import Entity, EntityMention, EvidenceEvent, EvidenceFile, User
@@ -25,6 +26,7 @@ from nlp.entity_validation import validate_entity_candidate
 from routes.auth import get_current_user
 from routes.case_access import require_case_access
 from routes.cases import _audit
+from utils.encryption import EnvelopeEncryption
 
 router = APIRouter()
 
@@ -95,6 +97,46 @@ async def _existing_evidence(db: AsyncSession, case_id: uuid.UUID, sha256: str) 
     )).scalar_one_or_none()
 
 
+def read_decrypted_bytes(ev_file: EvidenceFile) -> bytes:
+    """Read plaintext bytes of an evidence file, decrypting on the fly if encrypted."""
+    storage_path = pathlib.Path(ev_file.storage_path)
+    if not storage_path.exists():
+        raise FileNotFoundError(f"Stored evidence file not found at {storage_path}")
+    raw_data = storage_path.read_bytes()
+    if not getattr(ev_file, "is_encrypted", False):
+        return raw_data
+    return EnvelopeEncryption.decrypt_bytes(
+        ciphertext=raw_data,
+        encrypted_dek_b64=ev_file.encrypted_dek,
+        iv_b64=ev_file.encryption_iv,
+    )
+
+
+@contextlib.contextmanager
+def open_decrypted_evidence(ev_file: EvidenceFile) -> Generator[pathlib.Path, None, None]:
+    """
+    Yields a temporary path containing the decrypted plaintext for parsing or analysis.
+    Safely removes the temporary plaintext file upon exit.
+    """
+    storage_path = pathlib.Path(ev_file.storage_path)
+    if not getattr(ev_file, "is_encrypted", False):
+        yield storage_path
+        return
+
+    plaintext = read_decrypted_bytes(ev_file)
+    suffix = pathlib.Path(ev_file.original_name or ev_file.filename).suffix
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(plaintext)
+        tmp.flush()
+        tmp_path = pathlib.Path(tmp.name)
+
+    try:
+        yield tmp_path
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+
+
 async def _register_evidence(
     db: AsyncSession,
     *,
@@ -114,14 +156,19 @@ async def _register_evidence(
     case_upload_dir = UPLOAD_DIR / str(case_id)
     case_upload_dir.mkdir(parents=True, exist_ok=True)
     destination = case_upload_dir / f"{uuid.uuid4().hex}{suffix}"
+
+    # Envelope encryption at rest: AES-256-GCM with per-file random DEK
+    ciphertext, encrypted_dek_b64, payload_iv_b64 = EnvelopeEncryption.encrypt_bytes(raw)
+    cipher_hash = hashlib.sha256(ciphertext).hexdigest()
+
     temp_path: pathlib.Path | None = None
     try:
         with tempfile.NamedTemporaryFile(dir=case_upload_dir, delete=False) as staged:
-            staged.write(raw)
+            staged.write(ciphertext)
             staged.flush()
             os.fsync(staged.fileno())
             temp_path = pathlib.Path(staged.name)
-        if _sha256_file(temp_path) != sha256:
+        if _sha256_file(temp_path) != cipher_hash:
             raise HTTPException(500, "Evidence integrity verification failed during ingestion")
         temp_path.replace(destination)
         ev_file = EvidenceFile(
@@ -134,6 +181,11 @@ async def _register_evidence(
             sha256_hash=sha256,
             storage_path=str(destination),
             uploaded_by=current.id,
+            is_encrypted=True,
+            encrypted_dek=encrypted_dek_b64,
+            encryption_iv=payload_iv_b64,
+            acquisition_tool="CyberDrishti Ingestion v5.0",
+            acquisition_timestamp=datetime.now(timezone.utc),
         )
         db.add(ev_file)
         await db.flush()
@@ -268,6 +320,8 @@ async def _process_evidence_file(evidence_file_id: str | uuid.UUID, file_path: s
         ev_file.upload_status = "processing"
         await db.commit()
 
+        ev_file_cm = open_decrypted_evidence(ev_file)
+        path = ev_file_cm.__enter__()
         try:
             # Lazy imports safely inside the try block
             from parsers.whatsapp_parser import parse_whatsapp_export
@@ -279,10 +333,11 @@ async def _process_evidence_file(evidence_file_id: str | uuid.UUID, file_path: s
             from parsers.location_timeline_parser import parse_location_timeline
             from parsers.seizure_memo_parser import parse_seizure_memo
 
-            path = pathlib.Path(file_path)
-            resolved_path = path.resolve()
-            if UPLOAD_DIR.resolve() not in resolved_path.parents:
+            storage_p = pathlib.Path(file_path)
+            resolved_storage = storage_p.resolve()
+            if UPLOAD_DIR.resolve() not in resolved_storage.parents:
                 raise ValueError("Evidence storage path is outside the protected upload directory")
+            resolved_path = path.resolve()
             if _sha256_file(resolved_path) != ev_file.sha256_hash:
                 raise ValueError("Stored evidence hash does not match the ingestion record")
             events: list[dict] = []
@@ -437,10 +492,9 @@ async def _process_evidence_file(evidence_file_id: str | uuid.UUID, file_path: s
                 )).scalars().all()
 
                 for prev_f in other_files:
-                    prev_p = pathlib.Path(prev_f.storage_path)
-                    if prev_p.exists():
+                    if prev_f.storage_path and pathlib.Path(prev_f.storage_path).exists():
                         try:
-                            prev_raw = prev_p.read_bytes()
+                            prev_raw = read_decrypted_bytes(prev_f)
                             prev_evts = (await db.execute(
                                 select(EvidenceEvent).where(EvidenceEvent.evidence_file_id == prev_f.id)
                             )).scalars().all()
@@ -758,6 +812,8 @@ async def _process_evidence_file(evidence_file_id: str | uuid.UUID, file_path: s
         except Exception as exc:
             ev_file.upload_status = "failed"
             ev_file.parse_error   = str(exc)
+        finally:
+            ev_file_cm.__exit__(None, None, None)
 
         await db.commit()
 
@@ -1012,3 +1068,56 @@ async def get_version_timeline(
         "lineage_count": len(lineages),
         "lineages":      lineages,
     }
+
+
+@router.get("/{case_id}/files/{evidence_id}/download")
+async def download_evidence(
+    case_id: str,
+    evidence_id: str,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """
+    Download seized evidence file.
+    Enforces case access control, decrypts on-the-fly, verifies Section 63 BSA SHA-256 integrity,
+    and logs the download event in the tamper-evident audit ledger.
+    """
+    case = await require_case_access(db, current, case_id)
+    try:
+        ev_uuid = uuid.UUID(str(evidence_id))
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid evidence UUID")
+
+    ev_file = await db.get(EvidenceFile, ev_uuid)
+    if not ev_file or ev_file.case_id != case.id:
+        raise HTTPException(404, "Evidence file not found")
+
+    plaintext = read_decrypted_bytes(ev_file)
+    if hashlib.sha256(plaintext).hexdigest() != ev_file.sha256_hash:
+        raise HTTPException(500, "Integrity check failed: Decrypted evidence hash mismatch")
+
+    from utils.audit import append_audit
+    await append_audit(
+        db,
+        action="EVIDENCE_DOWNLOADED",
+        resource_type="evidence_file",
+        resource_id=str(ev_file.id),
+        details={
+            "case_id": str(case.id),
+            "case_number": case.case_number,
+            "filename": ev_file.original_name,
+            "sha256_hash": ev_file.sha256_hash,
+        },
+        user_id=str(current.id),
+    )
+
+    from fastapi.responses import Response
+    return Response(
+        content=plaintext,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{ev_file.original_name}"',
+            "X-Evidence-SHA256": ev_file.sha256_hash,
+        },
+    )
+

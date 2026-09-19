@@ -83,7 +83,21 @@ async def test_multi_tenant_case_access_isolation():
         assert exc_info.value.status_code == 404
         assert "Case not found" in str(exc_info.value.detail)
 
-        # 3. Admin user accessing Officer A's case -> Success (Admin supervisor override)
+        # 3. Admin user without assignment -> 404 (Default denial / Separation of duties)
+        with pytest.raises(HTTPException) as exc_admin:
+            await require_case_access(db, admin_user, str(case_a.id))
+        assert exc_admin.value.status_code == 404
+
+        # 3b. Admin added as case collaborator -> Access Granted
+        from db.models import CaseCollaborator
+        collab = CaseCollaborator(
+            case_id=case_a.id,
+            user_id=admin_user.id,
+            role="supervisor",
+            assigned_by=officer_a.id,
+        )
+        db.add(collab)
+        await db.commit()
         admin_access = await require_case_access(db, admin_user, str(case_a.id))
         assert admin_access.id == case_a.id
 
@@ -112,7 +126,7 @@ async def test_jwt_token_tampering_and_signatures():
         db.add(user)
         await db.commit()
 
-        token, _ = _create_token(user_uuid, "io")
+        token, *_ = _create_token(user_uuid, "io")
         assert token and isinstance(token, str)
 
         # 1. Valid token resolves active user
