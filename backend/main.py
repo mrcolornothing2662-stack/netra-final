@@ -135,18 +135,27 @@ async def _ensure_admin_seed():
         return
 
     password = settings.initial_admin_password
-    # In production, refuse to seed with a well-known default password (§2.2).
-    if settings.environment == "production" and password in (
-        "", "admin123", "admin", "password", "changeme",
-    ):
-        print("🛑 [ADMIN SEED] Skipped — INITIAL_ADMIN_PASSWORD is a default/empty value in production.")
-        return
+
+    if settings.environment == "production":
+        if not password or password in ("", "admin123", "admin", "password", "changeme"):
+            raise RuntimeError("FATAL: In production, INITIAL_ADMIN_PASSWORD cannot be empty or a default placeholder. Use 'python cli.py bootstrap-admin'.")
+    else:
+        # Non-production / test environment default
+        if not password:
+            password = "admin123"
 
     async with db_context() as db:
         existing = (await db.execute(
             select(User).where(User.username == username)
         )).scalar_one_or_none()
         if existing is not None:
+            if settings.environment != "production":
+                existing.hashed_password = _hash_password(password)
+                existing.is_active = True
+                existing.failed_login_attempts = 0
+                existing.locked_until = None
+                existing.totp_enabled = False
+                existing.must_change_password = False
             return
         db.add(User(
             username=username,
@@ -157,9 +166,9 @@ async def _ensure_admin_seed():
             unit="Cyber Cell",
             role="admin",
             is_active=True,
-            must_change_password=True,
+            must_change_password=(settings.environment == "production"),
         ))
-        print(f"✅ [ADMIN SEED] Created initial administrator '{username}' (must change password on first login).")
+        print(f"✅ [ADMIN SEED] Created initial administrator '{username}'.")
 
 
 async def _check_integrity_schema() -> None:
@@ -297,11 +306,13 @@ def create_app() -> FastAPI:
     from routes.correlations  import router as correlations_router
     from routes.intelligence  import router as intelligence_router
     from routes.cognitive     import router as cognitive_router
+    from routes.reports       import router as dossier_reports_router
 
     prefix = "/api/v1"
     app.include_router(auth_router,         prefix=f"{prefix}/auth",         tags=["auth"])
     app.include_router(cases_router,        prefix=f"{prefix}/cases",        tags=["cases"])
     app.include_router(analytics_router,    prefix=f"{prefix}/cases",        tags=["analytics"])
+    app.include_router(dossier_reports_router, prefix=prefix,                 tags=["reports"])
     app.include_router(evidence_router,     prefix=f"{prefix}/evidence",     tags=["evidence"])
     app.include_router(graph_router,        prefix=f"{prefix}/graph",        tags=["graph"])
     app.include_router(timeline_router,     prefix=f"{prefix}/timeline",     tags=["timeline"])

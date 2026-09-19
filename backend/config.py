@@ -3,7 +3,7 @@ CyberDrishti AI — Application Configuration
 Loaded once at startup via Pydantic Settings (reads from environment / .env file).
 """
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Optional
 from pathlib import Path
 
 _BASE_DIR = Path(__file__).resolve().parent
@@ -26,7 +26,11 @@ class Settings(BaseSettings):
 
     secret_key: str = "CHANGE_ME_IN_PRODUCTION_32_CHAR_MIN"
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 480  # 8 hours for investigation sessions
+    access_token_expire_minutes: int = 15  # Short-lived access token (15 mins)
+    refresh_token_expire_days: int = 7     # Refresh token rotation lifetime (7 days)
+    login_max_failed_attempts: int = 5     # Lock account after 5 consecutive failures
+    login_lockout_minutes: int = 15        # Lockout duration (15 mins)
+    vault_master_key: Optional[str] = None # Master key for envelope encryption at rest
 
     database_url: str = "postgresql://cyberdrishti:cyberdrishti_secret@localhost:5432/cyberdrishti"
     db_pool_size: int = 25
@@ -85,7 +89,7 @@ class Settings(BaseSettings):
     # db/init_db.sql, the initial administrator is seeded from these values at
     # startup (bcrypt-hashed). Change them in production via environment variables.
     initial_admin_username: str = "admin"
-    initial_admin_password: str = "admin123"
+    initial_admin_password: Optional[str] = None  # Must be provided via environment or CLI bootstrap
     initial_admin_email: str = "admin@cyberdrishti.gov.in"
     initial_admin_full_name: str = "Administrator"
 

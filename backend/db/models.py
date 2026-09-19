@@ -41,6 +41,10 @@ class User(Base):
     role           = Column(String(32), nullable=False, default="constable")
     is_active      = Column(Boolean, nullable=False, default=True)
     must_change_password = Column(Boolean, nullable=False, default=False)
+    totp_secret    = Column(String(64), nullable=True)
+    totp_enabled   = Column(Boolean, nullable=False, default=False)
+    failed_login_attempts = Column(Integer, nullable=False, default=0)
+    locked_until   = Column(DateTime(timezone=True), nullable=True)
     created_at     = Column(DateTime(timezone=True), server_default=func.now())
     updated_at     = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -121,6 +125,17 @@ class EvidenceFile(Base):
     fingerprint_hash   = Column(String(64))
     variant_details    = Column(JSONB, default=dict)
 
+    # Source Device & Forensic Integrity
+    source_device_hash  = Column(String(64), nullable=True)
+    acquisition_tool    = Column(String(128), nullable=True)
+    acquisition_timestamp = Column(DateTime(timezone=True), nullable=True)
+    officer_notes       = Column(Text, nullable=True)
+
+    # Envelope Encryption at Rest
+    is_encrypted        = Column(Boolean, nullable=False, default=False)
+    encrypted_dek       = Column(Text, nullable=True)
+    encryption_iv       = Column(String(64), nullable=True)
+
     case     = relationship("Case", back_populates="evidence_files")
     uploader = relationship("User", back_populates="uploaded_files")
     events   = relationship("EvidenceEvent", back_populates="evidence_file")
@@ -131,6 +146,55 @@ class EvidenceFile(Base):
         UniqueConstraint("storage_path", name="uq_evidence_storage_path"),
         CheckConstraint("file_size_bytes IS NULL OR file_size_bytes >= 0", name="ck_evidence_size"),
     )
+
+
+# ── Case Collaborators ───────────────────────────────────────────────────────
+
+class CaseCollaborator(Base):
+    __tablename__ = "case_collaborators"
+
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id     = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    user_id     = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role        = Column(String(32), nullable=False, default="io")
+    assigned_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at  = Column(DateTime(timezone=True), server_default=func.now())
+
+    case     = relationship("Case")
+    user     = relationship("User", foreign_keys=[user_id])
+    assigner = relationship("User", foreign_keys=[assigned_by])
+
+    __table_args__ = (
+        UniqueConstraint("case_id", "user_id", name="uq_case_collaborators_case_user"),
+        Index("idx_case_collaborators_case_id", "case_id"),
+        Index("idx_case_collaborators_user_id", "user_id"),
+    )
+
+
+# ── Dossier Export Approvals ─────────────────────────────────────────────────
+
+class DossierExportApproval(Base):
+    __tablename__ = "dossier_export_approvals"
+
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id          = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    report_type      = Column(String(64), nullable=False)
+    requested_by     = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    approved_by      = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    status           = Column(String(32), nullable=False, default="PENDING")
+    rejection_reason = Column(Text, nullable=True)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now())
+    reviewed_at      = Column(DateTime(timezone=True), nullable=True)
+
+    case      = relationship("Case")
+    requester = relationship("User", foreign_keys=[requested_by])
+    approver  = relationship("User", foreign_keys=[approved_by])
+
+    __table_args__ = (
+        CheckConstraint("status IN ('PENDING', 'APPROVED', 'REJECTED')", name="ck_dossier_export_status"),
+        Index("idx_dossier_export_case_status", "case_id", "status"),
+    )
+
 
 
 # ── Evidence Events ──────────────────────────────────────────────────────────
