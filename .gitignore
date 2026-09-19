@@ -7,6 +7,9 @@ backend/.env.*
 frontend/.env
 frontend/.env.*
 frontend/.env.local
+!.env.example
+!backend/.env.example
+!frontend/.env.example
 
 # Python & Virtual Environments
 backend/venv
@@ -67,5 +70,6 @@ Thumbs.db
 *.tmp
 frontend_backup/
 *.zip
+!backend/tests/fixtures/*.zip
 cyberdrishti-3d-login/
 
