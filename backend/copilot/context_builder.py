@@ -210,11 +210,13 @@ class ContextBuilder:
                 total_findings=0,
             )
 
-        files_cnt = (
+        ev_rows = (
             await db.execute(
-                select(func.count(EvidenceFile.id)).where(EvidenceFile.case_id == case_uuid)
+                select(EvidenceFile.original_name, EvidenceFile.filename).where(EvidenceFile.case_id == case_uuid)
             )
-        ).scalar() or 0
+        ).all()
+        files_cnt = len(ev_rows)
+        ev_file_names = [r[0] or r[1] for r in ev_rows if (r[0] or r[1])]
 
         entities_cnt = (
             await db.execute(
@@ -245,6 +247,7 @@ class ContextBuilder:
             total_entities=int(entities_cnt),
             total_events=int(events_cnt),
             total_findings=int(findings_cnt),
+            evidence_files=ev_file_names,
         )
 
     # ─────────────────────────────────────────────────────────────────────────

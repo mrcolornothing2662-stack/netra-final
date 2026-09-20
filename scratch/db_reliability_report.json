@@ -4,7 +4,7 @@
     "max_overflow": 50,
     "pre_ping_active": true,
     "concurrent_sessions_tested": 35,
-    "duration_seconds": 0.083,
+    "duration_seconds": 0.099,
     "zero_leaks_verified": true
   },
   "transaction_atomicity": {
@@ -13,7 +13,7 @@
     "acid_atomicity_enforced": true
   },
   "cascade_safety": {
-    "deletion_duration_ms": 37.66,
+    "deletion_duration_ms": 55.28,
     "child_tables_verified": [
       "EvidenceFile",
       "EvidenceEvent",
@@ -38,10 +38,10 @@
     }
   },
   "backup_snapshot": {
-    "file_path": "./scratch/netra5_backup_snapshot.sql",
-    "file_size_bytes": 370148617,
-    "sha256": "5f8cc4dae86fb5a6a62751a9a2fa23f35439b8035638d23a9f48f99d5b2b3cd8",
-    "generation_seconds": 1.53,
+    "file_path": "/Users/shubhamrana/netra5.0/scratch/netra5_backup_snapshot.sql",
+    "file_size_bytes": 392832715,
+    "sha256": "69b82f68fa835e6332f122c6764191a33b5f0b434964cc8b50e278d857f932bb",
+    "generation_seconds": 2.66,
     "tables_verified": [
       "cases",
       "entities",
@@ -49,7 +49,7 @@
       "audit_log"
     ]
   },
-  "total_duration_seconds": 2.47,
+  "total_duration_seconds": 3.87,
   "checkpoints_passed": 24,
   "total_checkpoints": 24
 }

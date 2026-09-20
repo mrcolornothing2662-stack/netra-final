@@ -67,32 +67,103 @@ NETRA 5.0 has undergone a 6-stage engineering validation pass with **100% certif
 
 ---
 
+## 🤖 Real Local LLM Copilot (Ollama Grounded Generation)
+
+NETRA 5.0 integrates a local LLM generation layer over its deterministic Hybrid RAG pipeline.
+
+```
+INVESTIGATOR QUERY → HYBRID RETRIEVAL (Vector + Graph + Structured + Timeline) → RRF → RERANKER
+  → CONTEXT BUILDER (Epistemic Partitioning) → PROMPT SHIELD → OLLAMA (llama3.2:1b)
+  → CLAIM VERIFICATION GATE → GROUNDED ANSWER + EVIDENCE CITATIONS
+```
+
+- **Local Inference:** Runs 100% locally via Ollama with `llama3.2:1b` (`http://localhost:11434`). Zero cloud data leakage.
+- **Epistemic Boundaries:** Strict separation between **Observed Facts** (directly in evidence) and **Inferred Correlations** (heuristic graph hypotheses).
+- **Prompt Injection Defense:** Evidence content is wrapped inside `<untrusted_case_evidence>` and parsed by a forensic shield; adversarial instructions in evidence are quarantined.
+- **Deterministic Offline Fallback:** If Ollama is unavailable, the copilot immediately falls back to `netra-grounded-fallback` with full citation grounding.
+- **Claim Verification Gate:** Every claim is verified against case facts; hallucinated claims are quarantined under *"The available context does not establish"*.
+
+---
+
 ## 🛠️ Quickstart Deployment Guide
 
-### Prerequisites
-- Docker 24+ and Docker Compose v2
-- Host OS: Ubuntu 22.04 / 24.04 LTS, RHEL 9, Debian 12, or macOS
+### System Requirements
+- **OS:** Linux (Ubuntu 22.04 / 24.04, Debian 12, RHEL 9) or macOS (Apple Silicon / Intel)
+- **Runtime:** Python 3.10+ (Python 3.12 recommended), Node.js 18+, PostgreSQL 16+ with `pgvector`
+- **LLM Engine:** Ollama with `llama3.2:1b` (Optional: offline fallback is built-in)
 
-### Step 1: Clone and Configure Environment
+---
+
+### Option A: Local Bare-Metal Development Setup
+
+#### 1. Clone & Configure Environment
 ```bash
-git clone https://github.com/police-department/netra5.0.git
-cd netra5.0
-cp .env.example .env.production
-# Secure permissions
-chmod 600 .env.production
+git clone https://github.com/shubhamrana2662/netra-final.git
+cd netra-final
+cp .env.example backend/.env
 ```
 
-### Step 2: Launch via Docker Compose
+#### 2. Start PostgreSQL & Ollama
 ```bash
-docker compose -f docker-compose.yml up -d --build
+# Ensure PostgreSQL with pgvector is running and created database 'cyberdrishti'
+# Start Ollama service and pull the lightweight model:
+ollama serve &
+ollama pull llama3.2:1b
 ```
 
-### Step 3: Verify Running Services
+#### 3. Backend Setup
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+alembic upgrade head
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+#### 4. Frontend Setup
+```bash
+cd ../frontend
+npm install
+npm run dev
+```
+Access the application at `http://localhost:5173` (or `http://localhost:3000`).
+
+---
+
+### Option B: Docker Compose Deployment
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+Verify running services:
 ```bash
 docker compose ps
-curl -s http://localhost:8000/health | jq .
+curl -s http://localhost:8000/health
 ```
-Open your browser at `http://localhost:3000` to access the NETRA 5.0 Investigative Workstation.
+
+---
+
+### 🧪 Running the Verification & Test Suites
+
+NETRA 5.0 includes comprehensive automated test suites:
+
+```bash
+# 1. Pytest Unit & Forensic Integrity Regression Suite (18 tests)
+cd backend
+.venv/bin/pytest tests/test_evidence_prehash_preview.py tests/test_evidence_batch_preview.py tests/test_evidence_integrity.py tests/test_contracts_pipeline.py
+
+# 2. Evidence Ingestion Hardening Suite (25 checks)
+.venv/bin/python scratch/test_ingestion_hardening_suite.py
+
+# 3. LLM Copilot & Ollama Verification Suite (10 checks)
+.venv/bin/python scratch/test_copilot_verification_suite.py
+
+# 4. Frontend Production Build
+cd ../frontend
+npm run build
+```
 
 ---
 

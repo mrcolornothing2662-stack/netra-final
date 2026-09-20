@@ -56,7 +56,10 @@ services:
     environment:
       DATABASE_URL: postgresql://cyberdrishti:cyberdrishti_secret@db:5432/cyberdrishti
       REDIS_URL: redis://redis:6379/0
-      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      NETRA_COPILOT_LLM_PROVIDER: ${NETRA_COPILOT_LLM_PROVIDER:-ollama}
+      NETRA_COPILOT_LLM_MODEL: ${NETRA_COPILOT_LLM_MODEL:-llama3.2:1b}
+      NETRA_COPILOT_OLLAMA_BASE_URL: ${NETRA_COPILOT_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       SECRET_KEY: ${SECRET_KEY:-change_me_in_production_please}
       ENVIRONMENT: ${ENVIRONMENT:-development}
     volumes:

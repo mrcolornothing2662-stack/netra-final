@@ -68,7 +68,7 @@
 /* ── Progress HUD (Side Rail) ── */
 .hud {
   position: fixed;
-  left: var(--gutter);
+  left: clamp(16px, 2.5vw, 36px);
   top: 50%;
   transform: translateY(-50%);
   z-index: 40;
@@ -87,6 +87,7 @@
   cursor: pointer;
   text-align: left;
   transition: opacity 0.2s ease;
+  white-space: nowrap;
 }
 .hudDot {
   width: 6px;
@@ -94,6 +95,7 @@
   border-radius: 50%;
   background: var(--text-muted);
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  flex-shrink: 0;
 }
 .hudItem:hover .hudDot {
   background: var(--text-secondary);
@@ -110,6 +112,7 @@
   color: var(--text-muted);
   opacity: 0.4;
   transition: opacity 0.2s ease, color 0.2s ease;
+  white-space: nowrap;
 }
 .hudItem:hover .hudLabel {
   opacity: 0.8;
@@ -187,26 +190,30 @@
   will-change: opacity, transform, filter;
   z-index: 2;
 }
+.chapterLayer .cardContent {
+  max-width: min(840px, calc(100vw - 440px));
+}
 
 .chapterLayerLeft {
   align-items: flex-start;
   text-align: left;
-  padding-left: clamp(32px, 8vw, 120px);
+  padding-left: clamp(230px, 19vw, 300px);
+  padding-right: var(--gutter);
 }
 .chapterLayerLeft .cardContent {
-  max-width: 520px;
+  max-width: clamp(420px, 38vw, 560px);
   align-items: flex-start;
 }
 
 .chapterLayerUpperLeft {
   align-items: flex-start;
-  justify-content: flex-start;
-  padding-top: clamp(80px, 12vh, 140px);
-  padding-left: clamp(32px, 8vw, 120px);
+  justify-content: center;
+  padding-left: clamp(230px, 19vw, 300px);
+  padding-right: var(--gutter);
   text-align: left;
 }
 .chapterLayerUpperLeft .cardContent {
-  max-width: 560px;
+  max-width: clamp(420px, 38vw, 560px);
   align-items: flex-start;
 }
 
@@ -224,7 +231,7 @@
 .cardContent::before {
   content: '';
   position: absolute;
-  inset: -28px -44px;
+  inset: -24px -28px;
   background: radial-gradient(ellipse at center, rgba(10, 11, 14, 0.75) 0%, rgba(10, 11, 14, 0.45) 50%, transparent 80%);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -268,29 +275,30 @@
 }
 
 .headline {
-  font-size: clamp(32px, 5vw, 64px);
-  line-height: 1.08;
+  font-size: clamp(28px, 3.8vw, 54px);
+  line-height: 1.16;
   font-weight: 500;
   letter-spacing: -0.02em;
   color: var(--text-primary);
-  margin: 0 0 var(--space-4);
+  margin: 0 0 var(--space-3);
   text-shadow: 0 2px 24px rgba(0, 0, 0, 0.9), 0 0 40px rgba(0, 0, 0, 0.75);
 }
 
 .subheadline {
-  font-size: clamp(24px, 4vw, 48px);
-  line-height: 1.15;
+  font-size: clamp(18px, 2.4vw, 32px);
+  line-height: 1.25;
   font-weight: 400;
-  color: var(--text-secondary);
+  color: rgba(241, 241, 238, 0.78);
   letter-spacing: -0.015em;
+  margin: 0 0 var(--space-3);
   text-shadow: 0 2px 18px rgba(0, 0, 0, 0.85);
 }
 
 .description {
   font: var(--type-body);
   color: var(--text-secondary);
-  max-width: 540px;
-  margin-top: var(--space-4);
+  max-width: 520px;
+  margin-top: var(--space-2);
   line-height: 1.6;
   text-shadow: 0 1px 12px rgba(0, 0, 0, 0.8);
 }
@@ -678,15 +686,29 @@
   .hud {
     display: none;
   }
+  .chapterLayerLeft,
+  .chapterLayerUpperLeft {
+    padding-left: var(--gutter);
+    padding-right: var(--gutter);
+    align-items: center;
+    text-align: center;
+  }
+  .chapterLayerLeft .cardContent,
+  .chapterLayerUpperLeft .cardContent,
+  .chapterLayer .cardContent {
+    max-width: 100%;
+    align-items: center;
+  }
   .navLinks {
     display: none;
   }
   .headline {
-    font-size: 28px;
-    line-height: 1.15;
+    font-size: 26px;
+    line-height: 1.18;
   }
   .subheadline {
-    font-size: 18px;
+    font-size: 16px;
+    line-height: 1.25;
   }
   .identityBadge {
     flex-direction: column;

@@ -7,21 +7,41 @@ import { useTrace, useTraceDwell } from "../../../state/traceHooks";
 import { useLiveStore } from "../../../state/useLiveStore";
 import { kindCounts } from "../../../data/evidence";
 import type { Evidence, EvidenceKind } from "../../../data/types";
+import { EvidencePreviewModal } from "./EvidencePreviewModal";
+import { evidenceApi, type EvidenceConfirmResponse, type EvidenceConfirmBatchResponse } from "../../../api/evidence";
 import s from "../../../components/case/case.module.css";
 
 export function EvidenceTab({ caseId }: { caseId: string }) {
-  const { activeEvidence, uploadEvidence, loading, fetchCaseDetails } = useLiveStore();
+  const { activeEvidence, refreshEvidence, fetchCaseDetails } = useLiveStore();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const activeKind = (searchParams.get("kind") as EvidenceKind | "ALL") || "ALL";
   const search = searchParams.get("q") || "";
 
   const [selected, setSelected] = useState<Evidence | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
   const [uploadFailed, setUploadFailed] = useState(false);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sheetCloseRef = useRef<HTMLButtonElement>(null);
+
+  const handleRetry = async (evidenceId: string) => {
+    try {
+      setRetryingId(evidenceId);
+      await evidenceApi.retryProcessing(caseId, evidenceId);
+      setUploadFailed(false);
+      setUploadMsg("Processing restarted. Extracting events, entities, and graph relations...");
+      await refreshEvidence(caseId);
+    } catch (err: unknown) {
+      setUploadFailed(true);
+      setUploadMsg(err instanceof Error ? err.message : "Failed to restart processing");
+    } finally {
+      setRetryingId(null);
+    }
+  };
 
   const items = activeEvidence;
   const kinds = kindCounts(items);
@@ -70,27 +90,25 @@ export function EvidenceTab({ caseId }: { caseId: string }) {
     }
   }, [selected]);
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    setUploading(true);
-    setUploadFailed(false);
-    setUploadMsg("Computing SHA-256 and indexing in backend…");
+    const chosen = Array.from(files);
+    setPendingFiles(chosen);
+    setPendingFile(chosen[0] || null);
+    setPreviewOpen(true);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
-    try {
-      await uploadEvidence(caseId, Array.from(files));
-      setUploadFailed(false);
-      setUploadMsg(`Successfully ingested ${files.length} evidence file(s).`);
-      setTimeout(() => setUploadMsg(null), 4000);
-    } catch {
-      // Honest failure — nothing was stored. Never claim a fake/local success.
-      setUploadFailed(true);
-      setUploadMsg("UPLOAD FAILED — Evidence was not stored. No evidence record has been created.");
-      setTimeout(() => setUploadMsg(null), 8000);
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+  const handleConfirmed = async (res: EvidenceConfirmResponse | EvidenceConfirmBatchResponse) => {
+    setUploadFailed(false);
+    if ("sealed_count" in res) {
+      setUploadMsg(`✓ ${res.sealed_count} evidence file(s) sealed into Section 63 BSA chain of custody.${res.failed_count > 0 ? ` (${res.failed_count} failed)` : ""}`);
+    } else {
+      setUploadMsg(`✓ Evidence "${res.filename}" sealed into Section 63 BSA chain of custody. SHA-256: ${res.sha256_hash ? res.sha256_hash.slice(0, 16) + "…" : "locked"}`);
     }
+    setTimeout(() => setUploadMsg(null), 8000);
+    await refreshEvidence(caseId);
   };
 
   return (
@@ -132,9 +150,9 @@ export function EvidenceTab({ caseId }: { caseId: string }) {
             variant="primary"
             icon="plus"
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
+            disabled={previewOpen}
           >
-            {uploading ? "Ingesting…" : "Ingest"}
+            Preview & Ingest
           </Button>
         </div>
       </div>
@@ -163,10 +181,10 @@ export function EvidenceTab({ caseId }: { caseId: string }) {
           </h3>
           <p className="measure" style={{ color: "var(--text-secondary)", font: "var(--type-body-sm)", margin: "0 auto var(--space-6) auto" }}>
             Ingest call detail records (CDR), WhatsApp extraction dumps, bank transaction ledgers (CSV/XLSX), or forensic disk dumps.
-            The system will automatically compute SHA-256 custody checksums under Section 63 BSA 2023 and extract network entities.
+            The system provides a read-only pre-hash inspection preview before computing SHA-256 custody checksums under Section 63 BSA 2023.
           </p>
-          <Button variant="primary" icon="plus" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-            {uploading ? "Ingesting Evidence…" : "Ingest Evidence Files"}
+          <Button variant="primary" icon="plus" onClick={() => fileInputRef.current?.click()} disabled={previewOpen}>
+            Preview & Ingest Evidence
           </Button>
         </div>
       ) : filtered.length === 0 ? (
@@ -228,6 +246,32 @@ export function EvidenceTab({ caseId }: { caseId: string }) {
             <p className="t-body measure" style={{ color: "var(--text-secondary)", marginBottom: "var(--space-6)" }}>
               {selected.notes ?? "Acquired in accordance with Section 63 BSA 2023. Bitstream digital duplicate generated upon collection."}
             </p>
+
+            {selected.status === "UNVERIFIED" && (
+              <div style={{
+                marginBottom: "var(--space-6)",
+                padding: "12px 16px",
+                background: "rgba(239, 68, 68, 0.08)",
+                border: "1px solid rgba(239, 68, 68, 0.25)",
+                borderRadius: "var(--radius-card)",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <div style={{ font: "var(--type-mono-xs)", color: "var(--critical)", fontWeight: 600 }}>
+                    PARSER NOTICE
+                  </div>
+                  <Button
+                    variant="secondary"
+                    onClick={() => handleRetry(selected.id)}
+                    disabled={retryingId === selected.id}
+                  >
+                    {retryingId === selected.id ? "Restarting..." : "Retry Processing"}
+                  </Button>
+                </div>
+                <div style={{ font: "var(--type-body-sm)", color: "var(--text-secondary)" }}>
+                  The evidence bitstream is securely sealed under Section 63 BSA. Parsing encountered an unhandled format or syntax error. Click Retry to re-run the forensic parser.
+                </div>
+              </div>
+            )}
 
             {((selected as any).variant_note || selected.variant_details) && (
               <div style={{
@@ -302,6 +346,19 @@ export function EvidenceTab({ caseId }: { caseId: string }) {
           </div>
         </>
       )}
+
+      <EvidencePreviewModal
+        isOpen={previewOpen}
+        caseId={caseId}
+        files={pendingFiles}
+        file={pendingFile}
+        onClose={() => {
+          setPreviewOpen(false);
+          setPendingFiles([]);
+          setPendingFile(null);
+        }}
+        onConfirmed={handleConfirmed}
+      />
     </div>
   );
 }

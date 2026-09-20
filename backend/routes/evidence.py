@@ -3,17 +3,23 @@ from __future__ import annotations
 CyberDrishti AI — Evidence Upload & Processing Routes (Phase 7)
 POST /upload — multipart zip, routes to parsers, SHA-256 hash at ingestion.
 """
+import base64
+import csv
 import hashlib
 import io
+import json
 import os
 import pathlib
 import tempfile
+import time
 import uuid
 import zipfile
+import asyncio
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import contextlib
@@ -28,12 +34,56 @@ from routes.case_access import require_case_access
 from routes.cases import _audit
 from utils.encryption import EnvelopeEncryption
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 UPLOAD_DIR = pathlib.Path(settings.upload_dir)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+STAGING_DIR = UPLOAD_DIR / "staging"
+STAGING_DIR.mkdir(parents=True, exist_ok=True)
 MAX_ARCHIVE_MEMBERS = 100
 MAX_ARCHIVE_RATIO = 100
+
+# ── Server-Side Idempotency Cache for Preview Confirmations ──────────────────
+# Retained for 1 hour to absorb network retries, browser reloads, and double-clicks
+_SEALED_PREVIEW_CACHE: dict[str, dict[str, Any]] = {}
+_SEALED_PREVIEW_LOCK = asyncio.Lock()
+
+
+def _cache_sealed_preview(preview_id: str, record: dict[str, Any]) -> None:
+    now = time.time()
+    for k in list(_SEALED_PREVIEW_CACHE.keys()):
+        if now - _SEALED_PREVIEW_CACHE[k].get("timestamp", 0) > 3600:
+            _SEALED_PREVIEW_CACHE.pop(k, None)
+    _SEALED_PREVIEW_CACHE[preview_id] = {
+        "timestamp": now,
+        "record": record,
+    }
+
+
+def _get_sealed_preview(preview_id: str) -> dict[str, Any] | None:
+    entry = _SEALED_PREVIEW_CACHE.get(preview_id)
+    if entry and (time.time() - entry.get("timestamp", 0) <= 3600):
+        return entry.get("record")
+    return None
+
+
+def _cleanup_stale_staging(max_age_seconds: int = 1800) -> None:
+    """Prune any abandoned unconfirmed preview staging files older than 30 minutes."""
+    try:
+        if not STAGING_DIR.exists():
+            return
+        now = time.time()
+        for p in STAGING_DIR.rglob("*"):
+            if p.is_file():
+                try:
+                    if now - p.stat().st_mtime > max_age_seconds:
+                        p.unlink(missing_ok=True)
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 
 def sanitize_db_val(val):
@@ -205,6 +255,222 @@ def _detect_file_type(filename: str) -> str:
         ".webp": "image", ".tiff": "image", ".bmp": "image",
         ".zip": "zip", ".txt": "txt", ".json": "json",
     }.get(ext, "other")
+
+
+def _detect_mime_and_validate(raw: bytes, filename: str) -> tuple[str, str]:
+    """
+    Validates file headers and detects MIME type and normalized category.
+    Protects against file extension spoofing and executable binaries disguised as documents.
+    """
+    ext = pathlib.Path(filename).suffix.lower()
+
+    # Check Magic Bytes
+    if raw.startswith(b"%PDF-"):
+        return "application/pdf", "pdf"
+    elif raw.startswith(b"PK\x03\x04") or raw.startswith(b"PK\x05\x06") or raw.startswith(b"PK\x07\x08"):
+        return "application/zip", "zip"
+    elif raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png", "image"
+    elif raw.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg", "image"
+    elif raw.startswith(b"RIFF") and len(raw) > 12 and raw[8:12] == b"WEBP":
+        return "image/webp", "image"
+    elif raw.startswith(b"II*\x00") or raw.startswith(b"MM\x00*"):
+        return "image/tiff", "image"
+    elif raw.startswith(b"BM"):
+        return "image/bmp", "image"
+
+    # Reject dangerous executable formats regardless of extension
+    if raw.startswith(b"MZ") or raw.startswith(b"\x7fELF") or raw.startswith(b"\xca\xfe\xba\xbe") or raw.startswith(b"\xfe\xed\xfa\xce") or raw.startswith(b"\xfe\xed\xfa\xcf"):
+        raise HTTPException(400, "Executable binary files are strictly prohibited in evidence intake")
+
+    # Check for text formats (JSON, CSV, TXT, LOG)
+    is_text = False
+    decoded_head = ""
+    for enc in ("utf-8", "utf-8-sig", "latin-1", "windows-1252"):
+        try:
+            decoded_head = raw[:4096].decode(enc)
+            is_text = True
+            break
+        except UnicodeDecodeError:
+            continue
+
+    if is_text:
+        stripped = decoded_head.strip()
+        if (stripped.startswith("{") and stripped.endswith("}")) or (stripped.startswith("[") and stripped.endswith("]")):
+            return "application/json", "json"
+        if ext in (".csv", ".tsv"):
+            return "text/csv", "csv"
+        if ext in (".txt", ".log"):
+            return "text/plain", "txt"
+        if ext in (".json",):
+            return "application/json", "json"
+        return "text/plain", "txt"
+
+    mapped = _detect_file_type(filename)
+    if mapped != "other":
+        mime_map = {
+            "pdf": "application/pdf",
+            "csv": "text/csv",
+            "image": "image/jpeg",
+            "zip": "application/zip",
+            "txt": "text/plain",
+            "json": "application/json",
+        }
+        return mime_map.get(mapped, "application/octet-stream"), mapped
+
+    return "application/octet-stream", "other"
+
+
+def _extract_preview_metadata(raw: bytes, filename: str, ftype: str, mime_type: str) -> dict[str, Any]:
+    """
+    Extract read-only inspection metadata from original bytes.
+    NEVER modifies original bytes. Purely for forensic review prior to cryptographic hashing.
+    """
+    metadata: dict[str, Any] = {
+        "filename": filename,
+        "file_type": ftype,
+        "mime_type": mime_type,
+        "file_size_bytes": len(raw),
+        "page_count": None,
+        "row_count": None,
+        "line_count": None,
+        "preview_text": None,
+        "preview_rows": None,
+        "preview_image": None,
+        "archive_manifest": None,
+        "detected_subtype": None,
+        "metadata_fields": {},
+    }
+
+    if ftype == "pdf":
+        try:
+            import pdfplumber
+            with pdfplumber.open(io.BytesIO(raw)) as pdf:
+                metadata["page_count"] = len(pdf.pages)
+                metadata["metadata_fields"] = {k: str(v) for k, v in (pdf.metadata or {}).items() if v}
+                if pdf.pages:
+                    first_text = pdf.pages[0].extract_text() or ""
+                    metadata["preview_text"] = first_text[:2000]
+                    lower_text = first_text.lower()
+                    if any(k in lower_text for k in ("evidence seizure", "custody memo", "seizure / custody memo")):
+                        metadata["detected_subtype"] = "Seizure / Panchnama Memo"
+                    elif any(k in lower_text for k in ("location / cell-site timeline", "cell-site association", "location reference")):
+                        metadata["detected_subtype"] = "Location & Cell Tower Timeline"
+                    elif any(k in lower_text for k in ("device extraction", "forensic extraction", "device id")):
+                        metadata["detected_subtype"] = "Device Extraction Report"
+                    elif any(k in lower_text for k in ("upi transaction", "upi report", "payer", "payee")):
+                        metadata["detected_subtype"] = "UPI / Banking Transaction Statement"
+                    elif any(k in lower_text for k in ("bank", "account", "balance", "debit", "credit")):
+                        metadata["detected_subtype"] = "Bank Statement"
+                    else:
+                        metadata["detected_subtype"] = "Forensic PDF Document"
+        except Exception as e:
+            metadata["metadata_fields"]["pdf_error"] = f"Partial read: {str(e)[:100]}"
+            metadata["detected_subtype"] = "PDF Document"
+
+    elif ftype == "csv":
+        try:
+            text_content = raw.decode("utf-8", errors="replace")
+            lines = [line for line in text_content.splitlines() if line.strip()]
+            metadata["line_count"] = len(lines)
+            metadata["row_count"] = max(0, len(lines) - 1)
+            reader = list(csv.reader(lines[:12]))
+            if reader:
+                headers = reader[0]
+                rows = reader[1:11]
+                metadata["preview_rows"] = {
+                    "headers": headers,
+                    "sample_rows": rows,
+                    "total_rows": metadata["row_count"],
+                }
+                head_str = " ".join(headers).lower()
+                if any(k in head_str for k in ("call", "duration", "imei", "imsi", "tower", "cdr")):
+                    metadata["detected_subtype"] = "Call Detail Record (CDR)"
+                elif any(k in head_str for k in ("narration", "credit", "debit", "balance", "upi")):
+                    metadata["detected_subtype"] = "Banking / Financial Ledger"
+                elif any(k in head_str for k in ("src_ip", "dst_ip", "bytes", "port", "protocol")):
+                    metadata["detected_subtype"] = "Network Traffic / Firewall Log"
+                elif any(k in head_str for k in ("sender", "message", "chat", "text")):
+                    metadata["detected_subtype"] = "Chat / Communication Export"
+                else:
+                    metadata["detected_subtype"] = "Structured CSV Dataset"
+        except Exception:
+            metadata["detected_subtype"] = "CSV Document"
+
+    elif ftype in ("txt", "json"):
+        try:
+            text_content = raw.decode("utf-8", errors="replace")
+            lines = text_content.splitlines()
+            metadata["line_count"] = len(lines)
+            metadata["preview_text"] = "\n".join(lines[:40])[:2500]
+            if ftype == "json":
+                metadata["detected_subtype"] = "Device Extraction JSON Payload"
+            else:
+                if any(":" in l and ("am" in l.lower() or "pm" in l.lower() or "-" in l) for l in lines[:5]):
+                    metadata["detected_subtype"] = "Chat / Messaging Transcript"
+                else:
+                    metadata["detected_subtype"] = "Text Forensic Artifact"
+        except Exception:
+            metadata["detected_subtype"] = "Text Document"
+
+    elif ftype == "image":
+        try:
+            from PIL import Image
+            with Image.open(io.BytesIO(raw)) as img:
+                metadata["metadata_fields"] = {
+                    "dimensions": f"{img.width} × {img.height}",
+                    "format": img.format,
+                    "mode": img.mode,
+                }
+                metadata["detected_subtype"] = f"{img.format or 'Image'} Evidence Capture"
+                if len(raw) < 1_500_000:
+                    b64 = base64.b64encode(raw).decode("ascii")
+                    metadata["preview_image"] = f"data:{mime_type};base64,{b64}"
+                else:
+                    thumb = img.copy()
+                    thumb.thumbnail((800, 800))
+                    buf = io.BytesIO()
+                    thumb.save(buf, format="JPEG", quality=80)
+                    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                    metadata["preview_image"] = f"data:image/jpeg;base64,{b64}"
+        except Exception:
+            metadata["detected_subtype"] = "Image Evidence"
+
+    elif ftype == "zip":
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                members = [m for m in zf.infolist() if not m.is_dir()]
+                total_uncompressed = sum(m.file_size for m in members)
+                metadata["metadata_fields"] = {
+                    "member_count": len(members),
+                    "uncompressed_size_bytes": total_uncompressed,
+                }
+                metadata["archive_manifest"] = [
+                    {
+                        "filename": _safe_display_name(m.filename),
+                        "file_size": m.file_size,
+                        "compress_size": m.compress_size,
+                    }
+                    for m in members[:50]
+                ]
+        except Exception:
+            metadata["detected_subtype"] = "ZIP Archive"
+
+    if metadata.get("preview_rows"):
+        p_rows = metadata["preview_rows"]
+        headers = p_rows.get("headers", [])
+        metadata["column_names"] = headers
+        metadata["sample_rows"] = [dict(zip(headers, r)) for r in p_rows.get("sample_rows", [])]
+    if metadata.get("preview_text"):
+        metadata["text_snippet"] = metadata["preview_text"]
+    if metadata.get("preview_image"):
+        metadata["thumbnail_data_url"] = metadata["preview_image"]
+    if metadata.get("archive_manifest"):
+        metadata["member_count"] = len(metadata["archive_manifest"])
+        metadata["members"] = [m["filename"] for m in metadata["archive_manifest"]]
+
+    return metadata
 
 
 def _classify_and_route_file(path: pathlib.Path) -> tuple[str, str]:
@@ -809,16 +1075,649 @@ async def _process_evidence_file(evidence_file_id: str | uuid.UUID, file_path: s
                 if not ev_file.parse_error:
                     ev_file.parse_error = f"Vector indexing deferred: {exc}"
 
+            await db.commit()
         except Exception as exc:
-            ev_file.upload_status = "failed"
-            ev_file.parse_error   = str(exc)
+            logger.error("Background evidence processing failed for %s: %s", evidence_file_id, exc)
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            try:
+                ev_f_fail = await db.get(EvidenceFile, evidence_file_id)
+                if ev_f_fail:
+                    ev_f_fail.upload_status = "failed"
+                    ev_f_fail.parse_error = str(exc)[:1000]
+                    await db.commit()
+            except Exception as inner_exc:
+                logger.error("Failed to commit failed status for %s: %s", evidence_file_id, inner_exc)
         finally:
             ev_file_cm.__exit__(None, None, None)
 
+
+# ── Pre-Hash Forensic Preview & Sealing Endpoints ──────────────────────────────
+
+@router.post("/preview")
+async def preview_evidence(
+    case_id:     str = Form(...),
+    source_type: str = Form(default="unknown"),
+    file:        UploadFile = File(...),
+    db:          AsyncSession = Depends(get_db),
+    current:     User = Depends(get_current_user),
+):
+    """
+    Stage an unhashed evidence file for read-only forensic preview.
+    Does NOT calculate canonical SHA-256 or insert database records.
+    Staged file is strictly isolated in quarantine pending officer review.
+    """
+    case = await require_case_access(db, current, case_id, write=True)
+    case_uuid = case.id
+
+    _cleanup_stale_staging()
+
+    max_bytes = settings.max_upload_size_mb * 1024 * 1024
+    raw = await _read_upload_limited(file, max_bytes)
+    display_name = _safe_display_name(file.filename)
+    mime_type, ftype = _detect_mime_and_validate(raw, display_name)
+
+    # Archive safety validations if zip
+    if ftype == "zip":
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                members = [member for member in zf.infolist() if not member.is_dir()]
+                if len(members) > MAX_ARCHIVE_MEMBERS:
+                    raise HTTPException(413, f"Archive contains more than {MAX_ARCHIVE_MEMBERS} files")
+                total_size = sum(member.file_size for member in members)
+                if total_size > max_bytes:
+                    raise HTTPException(413, "Archive uncompressed contents exceed upload limit")
+                for member in members:
+                    norm_p = pathlib.PurePosixPath(member.filename)
+                    if ".." in norm_p.parts or norm_p.is_absolute() or member.filename.startswith(("/", "\\")):
+                        raise HTTPException(400, f"Evidence archive rejected: member '{member.filename}' contains unsafe path traversal")
+                    if member.flag_bits & 0x1:
+                        raise HTTPException(400, "Encrypted archives are not supported")
+                    ratio = member.file_size / max(member.compress_size, 1)
+                    if ratio > MAX_ARCHIVE_RATIO:
+                        raise HTTPException(400, "Archive compression ratio exceeds safety limit")
+        except zipfile.BadZipFile:
+            raise HTTPException(400, "Invalid ZIP archive")
+
+    preview_id = uuid.uuid4().hex
+    case_staging_dir = STAGING_DIR / str(case_uuid)
+    case_staging_dir.mkdir(parents=True, exist_ok=True)
+    staged_path = case_staging_dir / f"{preview_id}___{display_name}"
+
+    with open(staged_path, "wb") as f:
+        f.write(raw)
+        f.flush()
+        os.fsync(f.fileno())
+
+    preview_meta = _extract_preview_metadata(raw, display_name, ftype, mime_type)
+
+    return {
+        "preview_id": preview_id,
+        "case_id": str(case_uuid),
+        "source_type": source_type,
+        "filename": display_name,
+        "mime_type": mime_type,
+        "file_size": len(raw),
+        "file_size_bytes": len(raw),
+        "status": "unhashed_preview",
+        "warning": "STATUS: PRE-HASH PREVIEW — Evidence has not yet been fingerprinted. No cryptographic hash has been computed or recorded.",
+        "preview": preview_meta,
+        "metadata": preview_meta,
+    }
+
+
+@router.post("/preview/cancel")
+async def cancel_preview(
+    case_id:    str = Form(...),
+    preview_id: str = Form(...),
+    db:         AsyncSession = Depends(get_db),
+    current:    User = Depends(get_current_user),
+):
+    """
+    Cancel an unsealed evidence preview.
+    Safely purges staged raw bytes from quarantine.
+    """
+    case = await require_case_access(db, current, case_id, write=True)
+    clean_preview_id = "".join(ch for ch in preview_id if ch.isalnum())
+    case_staging_dir = STAGING_DIR / str(case.id)
+
+    removed = False
+    if case_staging_dir.exists():
+        for staged_file in case_staging_dir.glob(f"{clean_preview_id}*"):
+            staged_file.unlink(missing_ok=True)
+            removed = True
+
+    return {"status": "discarded", "preview_id": preview_id, "purged": removed}
+
+
+@router.post("/preview/batch")
+async def preview_evidence_batch(
+    case_id:     str = Form(...),
+    source_type: str = Form(default="unknown"),
+    files:       list[UploadFile] = File(...),
+    db:          AsyncSession = Depends(get_db),
+    current:     User = Depends(get_current_user),
+):
+    """
+    Stage multiple unhashed evidence files for read-only forensic batch preview.
+    Does NOT calculate canonical SHA-256 or insert database records.
+    Staged files are strictly isolated in quarantine pending officer review.
+    """
+    case = await require_case_access(db, current, case_id, write=True)
+    case_uuid = case.id
+
+    _cleanup_stale_staging()
+
+    max_bytes = settings.max_upload_size_mb * 1024 * 1024
+    case_staging_dir = STAGING_DIR / str(case_uuid)
+    case_staging_dir.mkdir(parents=True, exist_ok=True)
+
+    items: list[dict[str, Any]] = []
+
+    for file in files:
+        display_name = _safe_display_name(file.filename)
+        try:
+            raw = await _read_upload_limited(file, max_bytes)
+            mime_type, ftype = _detect_mime_and_validate(raw, display_name)
+
+            if ftype == "zip":
+                try:
+                    with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                        members = [member for member in zf.infolist() if not member.is_dir()]
+                        if len(members) > MAX_ARCHIVE_MEMBERS:
+                            raise HTTPException(413, f"Archive contains more than {MAX_ARCHIVE_MEMBERS} files")
+                        total_size = sum(member.file_size for member in members)
+                        if total_size > max_bytes:
+                            raise HTTPException(413, "Archive uncompressed contents exceed upload limit")
+                        for member in members:
+                            norm_p = pathlib.PurePosixPath(member.filename)
+                            if ".." in norm_p.parts or norm_p.is_absolute() or member.filename.startswith(("/", "\\")):
+                                raise HTTPException(400, f"Evidence archive rejected: member '{member.filename}' contains unsafe path traversal")
+                            if member.flag_bits & 0x1:
+                                raise HTTPException(400, "Encrypted archives are not supported")
+                            ratio = member.file_size / max(member.compress_size, 1)
+                            if ratio > MAX_ARCHIVE_RATIO:
+                                raise HTTPException(400, "Archive compression ratio exceeds safety limit")
+                except zipfile.BadZipFile:
+                    raise HTTPException(400, "Invalid ZIP archive")
+
+            preview_id = uuid.uuid4().hex
+            staged_path = case_staging_dir / f"{preview_id}___{display_name}"
+
+            with open(staged_path, "wb") as f:
+                f.write(raw)
+                f.flush()
+                os.fsync(f.fileno())
+
+            preview_meta = _extract_preview_metadata(raw, display_name, ftype, mime_type)
+
+            items.append({
+                "preview_id": preview_id,
+                "case_id": str(case_uuid),
+                "source_type": source_type,
+                "filename": display_name,
+                "mime_type": mime_type,
+                "file_size": len(raw),
+                "file_size_bytes": len(raw),
+                "status": "unhashed_preview",
+                "warning": "STATUS: PRE-HASH PREVIEW — Evidence has not yet been fingerprinted. No cryptographic hash has been computed or recorded.",
+                "preview": preview_meta,
+                "metadata": preview_meta,
+            })
+        except HTTPException as he:
+            items.append({
+                "preview_id": None,
+                "case_id": str(case_uuid),
+                "source_type": source_type,
+                "filename": display_name,
+                "mime_type": "unknown",
+                "file_size": 0,
+                "file_size_bytes": 0,
+                "status": "error",
+                "error": str(he.detail),
+                "warning": "Pre-flight inspection rejected file",
+                "preview": {"file_type": "other", "error": str(he.detail)},
+                "metadata": {"file_type": "other", "error": str(he.detail)},
+            })
+        except Exception as e:
+            items.append({
+                "preview_id": None,
+                "case_id": str(case_uuid),
+                "source_type": source_type,
+                "filename": display_name,
+                "mime_type": "unknown",
+                "file_size": 0,
+                "file_size_bytes": 0,
+                "status": "error",
+                "error": str(e),
+                "warning": "Pre-flight inspection rejected file",
+                "preview": {"file_type": "other", "error": str(e)},
+                "metadata": {"file_type": "other", "error": str(e)},
+            })
+
+    return {
+        "case_id": str(case_uuid),
+        "total": len(items),
+        "items": items,
+    }
+
+
+@router.post("/preview/cancel/batch")
+async def cancel_preview_batch(
+    case_id:          str = Form(...),
+    preview_ids:      list[str] = Form(default=[]),
+    preview_ids_json: str | None = Form(default=None),
+    db:               AsyncSession = Depends(get_db),
+    current:          User = Depends(get_current_user),
+):
+    """
+    Cancel multiple unsealed evidence previews.
+    Safely purges staged raw bytes from quarantine.
+    """
+    case = await require_case_access(db, current, case_id, write=True)
+    all_ids: list[str] = list(preview_ids)
+    if preview_ids_json:
+        try:
+            parsed = json.loads(preview_ids_json)
+            if isinstance(parsed, list):
+                all_ids.extend(str(x) for x in parsed)
+        except Exception:
+            pass
+
+    case_staging_dir = STAGING_DIR / str(case.id)
+    purged_count = 0
+    purged_ids = []
+
+    if case_staging_dir.exists():
+        for pid in all_ids:
+            clean_pid = "".join(ch for ch in pid if ch.isalnum())
+            if not clean_pid:
+                continue
+            for staged_file in case_staging_dir.glob(f"{clean_pid}*"):
+                staged_file.unlink(missing_ok=True)
+                purged_count += 1
+                purged_ids.append(pid)
+
+    return {
+        "status": "discarded",
+        "purged_count": purged_count,
+        "purged_ids": purged_ids,
+    }
+
+
+@router.post("/confirm")
+async def confirm_and_seal_evidence(
+    background_tasks: BackgroundTasks,
+    case_id:       str = Form(...),
+    preview_id:    str = Form(...),
+    source_type:   str = Form(default="unknown"),
+    original_name: str | None = Form(default=None),
+    db:            AsyncSession = Depends(get_db),
+    current:       User = Depends(get_current_user),
+):
+    """
+    Confirm and seal staged evidence into Section 63 BSA chain of custody.
+    Computes canonical SHA-256 from exact original staged bytes on the server.
+    Creates permanent encrypted EvidenceFile record and triggers analysis pipeline.
+    """
+    case = await require_case_access(db, current, case_id, write=True)
+    case_uuid = case.id
+    clean_preview_id = "".join(ch for ch in preview_id if ch.isalnum())
+    case_staging_dir = STAGING_DIR / str(case_uuid)
+
+    cached = _get_sealed_preview(clean_preview_id)
+    if cached:
+        return cached
+
+    staged_matches = list(case_staging_dir.glob(f"{clean_preview_id}*")) if case_staging_dir.exists() else []
+    if not staged_matches:
+        raise HTTPException(404, "Staged preview file not found or expired")
+
+    staged_file = staged_matches[0]
+    raw = staged_file.read_bytes()
+
+    # Determine original filename from staged file naming convention
+    if "___" in staged_file.name:
+        inferred_name = staged_file.name.split("___", 1)[1]
+    else:
+        inferred_name = original_name or f"evidence_{clean_preview_id[:8]}{staged_file.suffix}"
+    final_display_name = _safe_display_name(inferred_name)
+    ftype = _detect_file_type(final_display_name)
+
+    created: list[dict] = []
+    duplicates: list[dict] = []
+    created_paths: list[pathlib.Path] = []
+    max_bytes = settings.max_upload_size_mb * 1024 * 1024
+
+    try:
+        if ftype == "zip":
+            with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                members = [member for member in zf.infolist() if not member.is_dir()]
+                for member in members:
+                    norm_p = pathlib.PurePosixPath(member.filename)
+                    if ".." in norm_p.parts or norm_p.is_absolute() or member.filename.startswith(("/", "\\")):
+                        raise HTTPException(400, f"Evidence archive rejected: member '{member.filename}' contains unsafe path traversal")
+
+                parent_zip_ev, parent_zip_path, parent_is_dup = await _register_evidence(
+                    db,
+                    case_id=case_uuid,
+                    current=current,
+                    original_name=final_display_name,
+                    source_type="archive_container",
+                    raw=raw,
+                )
+                parent_record = {
+                    "id": str(parent_zip_ev.id),
+                    "filename": parent_zip_ev.original_name,
+                    "sha256_hash": parent_zip_ev.sha256_hash,
+                }
+                if parent_is_dup:
+                    duplicates.append(parent_record)
+                else:
+                    created.append(parent_record)
+                    created_paths.append(parent_zip_path)
+                    parent_zip_ev.upload_status = "processed"
+
+                for member in members:
+                    member_bytes = zf.read(member)
+                    member_name = pathlib.PurePath(member.filename.replace("\\", "/")).name or "member"
+                    ev_f, member_path, is_dup = await _register_evidence(
+                        db,
+                        case_id=case_uuid,
+                        current=current,
+                        original_name=member_name,
+                        source_type=source_type,
+                        raw=member_bytes,
+                    )
+                    ev_f.parent_evidence_id = parent_zip_ev.id
+                    item = {"id": str(ev_f.id), "filename": ev_f.original_name, "sha256_hash": ev_f.sha256_hash, "parent_evidence_id": str(parent_zip_ev.id)}
+                    if is_dup:
+                        duplicates.append(item)
+                        await _audit(db, current, "EVIDENCE_DUPLICATE_DETECTED", str(case_uuid), {
+                            "evidence_id": str(ev_f.id),
+                            "submitted_name": member_name,
+                            "sha256": ev_f.sha256_hash,
+                        })
+                    else:
+                        created.append(item)
+                        created_paths.append(member_path)
+                        await _audit(db, current, "EVIDENCE_UPLOADED", str(case_uuid), {
+                            "evidence_id": str(ev_f.id),
+                            "original_name": ev_f.original_name,
+                            "sha256": ev_f.sha256_hash,
+                            "size_bytes": ev_f.file_size_bytes,
+                        })
+                        background_tasks.add_task(_process_evidence_file, str(ev_f.id), str(member_path))
+        else:
+            ev_f, destination, is_dup = await _register_evidence(
+                db,
+                case_id=case_uuid,
+                current=current,
+                original_name=final_display_name,
+                source_type=source_type,
+                raw=raw,
+            )
+            item = {"id": str(ev_f.id), "filename": ev_f.original_name, "sha256_hash": ev_f.sha256_hash}
+            if is_dup:
+                duplicates.append(item)
+                await _audit(db, current, "EVIDENCE_DUPLICATE_DETECTED", str(case_uuid), {
+                    "evidence_id": str(ev_f.id),
+                    "submitted_name": final_display_name,
+                    "sha256": ev_f.sha256_hash,
+                })
+            else:
+                created.append(item)
+                created_paths.append(destination)
+                await _audit(db, current, "EVIDENCE_UPLOADED", str(case_uuid), {
+                    "evidence_id": str(ev_f.id),
+                    "original_name": ev_f.original_name,
+                    "sha256": ev_f.sha256_hash,
+                    "size_bytes": ev_f.file_size_bytes,
+                })
+                background_tasks.add_task(_process_evidence_file, str(ev_f.id), str(destination))
+
         await db.commit()
+        staged_file.unlink(missing_ok=True)
+    except Exception:
+        await db.rollback()
+        for created_path in created_paths:
+            created_path.unlink(missing_ok=True)
+        raise
+
+    if settings.enable_cognitive_orchestration and created:
+        background_tasks.add_task(_run_orchestration_after_upload, str(case_uuid))
+
+    primary = created[0] if created else (duplicates[0] if duplicates else None)
+    res = {
+        "status": "sealed",
+        "message": "Evidence successfully sealed into chain of custody",
+        "id": primary["id"] if primary else None,
+        "filename": primary["filename"] if primary else final_display_name,
+        "sha256_hash": primary["sha256_hash"] if primary else None,
+        "uploaded_count": len(created),
+        "duplicate_count": len(duplicates),
+        "files": created,
+        "duplicates": duplicates,
+    }
+    _cache_sealed_preview(clean_preview_id, res)
+    return res
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+@router.post("/confirm/batch")
+async def confirm_and_seal_evidence_batch(
+    background_tasks: BackgroundTasks,
+    case_id:          str = Form(...),
+    preview_ids:      list[str] = Form(default=[]),
+    items:            str | None = Form(default=None),
+    source_type:      str = Form(default="unknown"),
+    db:               AsyncSession = Depends(get_db),
+    current:          User = Depends(get_current_user),
+):
+    """
+    Confirm and seal a batch of staged evidence files into Section 63 BSA chain of custody.
+    Computes canonical SHA-256 from exact original staged bytes on the server.
+    Independent processing per file: partial failures do not roll back valid records.
+    Provides deterministic server-side idempotency against double-clicks and retries.
+    """
+    case = await require_case_access(db, current, case_id, write=True)
+    case_uuid = case.id
+    case_staging_dir = STAGING_DIR / str(case_uuid)
+
+    batch_requests: list[dict[str, Any]] = []
+    if items:
+        try:
+            parsed_items = json.loads(items)
+            if isinstance(parsed_items, list):
+                batch_requests = parsed_items
+        except Exception:
+            pass
+
+    if not batch_requests and preview_ids:
+        batch_requests = [{"preview_id": pid, "source_type": source_type} for pid in preview_ids]
+
+    if not batch_requests:
+        raise HTTPException(400, "No evidence items supplied for batch confirmation")
+
+    sealed: list[dict[str, Any]] = []
+    duplicates: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+
+    for req in batch_requests:
+        pid = req.get("preview_id")
+        item_source_type = req.get("source_type") or source_type or "unknown"
+        original_name = req.get("original_name")
+
+        if not pid:
+            failed.append({"preview_id": None, "filename": original_name or "unknown", "error": "Missing preview ID"})
+            continue
+
+        clean_preview_id = "".join(ch for ch in str(pid) if ch.isalnum())
+        cached = _get_sealed_preview(clean_preview_id)
+        if cached:
+            if isinstance(cached, list):
+                sealed.extend(cached)
+            else:
+                sealed.append(cached)
+            continue
+
+        staged_matches = list(case_staging_dir.glob(f"{clean_preview_id}*")) if case_staging_dir.exists() else []
+        if not staged_matches:
+            failed.append({"preview_id": pid, "filename": original_name or f"evidence_{clean_preview_id[:8]}", "error": "Staged preview file not found or expired"})
+            continue
+
+        staged_file = staged_matches[0]
+        file_created_paths: list[pathlib.Path] = []
+        try:
+            raw = staged_file.read_bytes()
+            if "___" in staged_file.name:
+                inferred_name = staged_file.name.split("___", 1)[1]
+            else:
+                inferred_name = original_name or f"evidence_{clean_preview_id[:8]}{staged_file.suffix}"
+            final_display_name = _safe_display_name(inferred_name)
+            ftype = _detect_file_type(final_display_name)
+
+            item_sealed: list[dict] = []
+            item_duplicates: list[dict] = []
+
+            if ftype == "zip":
+                with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                    members = [member for member in zf.infolist() if not member.is_dir()]
+                    for member in members:
+                        norm_p = pathlib.PurePosixPath(member.filename)
+                        if ".." in norm_p.parts or norm_p.is_absolute() or member.filename.startswith(("/", "\\")):
+                            raise HTTPException(400, f"Evidence archive rejected: member '{member.filename}' contains unsafe path traversal")
+
+                    parent_zip_ev, parent_zip_path, parent_is_dup = await _register_evidence(
+                        db,
+                        case_id=case_uuid,
+                        current=current,
+                        original_name=final_display_name,
+                        source_type="archive_container",
+                        raw=raw,
+                    )
+                    parent_record = {
+                        "id": str(parent_zip_ev.id),
+                        "filename": parent_zip_ev.original_name,
+                        "sha256_hash": parent_zip_ev.sha256_hash,
+                        "file_size_bytes": parent_zip_ev.file_size_bytes,
+                        "preview_id": pid,
+                    }
+                    if parent_is_dup:
+                        item_duplicates.append(parent_record)
+                    else:
+                        item_sealed.append(parent_record)
+                        file_created_paths.append(parent_zip_path)
+                        parent_zip_ev.upload_status = "processed"
+
+                    for member in members:
+                        member_bytes = zf.read(member)
+                        member_name = pathlib.PurePath(member.filename.replace("\\", "/")).name or "member"
+                        ev_f, member_path, is_dup = await _register_evidence(
+                            db,
+                            case_id=case_uuid,
+                            current=current,
+                            original_name=member_name,
+                            source_type=item_source_type,
+                            raw=member_bytes,
+                        )
+                        ev_f.parent_evidence_id = parent_zip_ev.id
+                        record_item = {
+                            "id": str(ev_f.id),
+                            "filename": ev_f.original_name,
+                            "sha256_hash": ev_f.sha256_hash,
+                            "file_size_bytes": ev_f.file_size_bytes,
+                            "preview_id": pid,
+                            "parent_evidence_id": str(parent_zip_ev.id),
+                        }
+                        if is_dup:
+                            item_duplicates.append(record_item)
+                            await _audit(db, current, "EVIDENCE_DUPLICATE_DETECTED", str(case_uuid), {
+                                "evidence_id": str(ev_f.id),
+                                "submitted_name": member_name,
+                                "sha256": ev_f.sha256_hash,
+                            })
+                        else:
+                            item_sealed.append(record_item)
+                            file_created_paths.append(member_path)
+                            await _audit(db, current, "EVIDENCE_UPLOADED", str(case_uuid), {
+                                "evidence_id": str(ev_f.id),
+                                "original_name": ev_f.original_name,
+                                "sha256": ev_f.sha256_hash,
+                                "size_bytes": ev_f.file_size_bytes,
+                            })
+                            background_tasks.add_task(_process_evidence_file, str(ev_f.id), str(member_path))
+            else:
+                ev_f, destination, is_dup = await _register_evidence(
+                    db,
+                    case_id=case_uuid,
+                    current=current,
+                    original_name=final_display_name,
+                    source_type=item_source_type,
+                    raw=raw,
+                )
+                record_item = {
+                    "id": str(ev_f.id),
+                    "filename": ev_f.original_name,
+                    "sha256_hash": ev_f.sha256_hash,
+                    "file_size_bytes": ev_f.file_size_bytes,
+                    "preview_id": pid,
+                }
+                if is_dup:
+                    item_duplicates.append(record_item)
+                    await _audit(db, current, "EVIDENCE_DUPLICATE_DETECTED", str(case_uuid), {
+                        "evidence_id": str(ev_f.id),
+                        "submitted_name": final_display_name,
+                        "sha256": ev_f.sha256_hash,
+                    })
+                else:
+                    item_sealed.append(record_item)
+                    file_created_paths.append(destination)
+                    await _audit(db, current, "EVIDENCE_UPLOADED", str(case_uuid), {
+                        "evidence_id": str(ev_f.id),
+                        "original_name": ev_f.original_name,
+                        "sha256": ev_f.sha256_hash,
+                        "size_bytes": ev_f.file_size_bytes,
+                    })
+                    background_tasks.add_task(_process_evidence_file, str(ev_f.id), str(destination))
+
+            # Commit individual file transaction so partial failures do not roll back valid records
+            await db.commit()
+            staged_file.unlink(missing_ok=True)
+            if item_sealed:
+                _cache_sealed_preview(clean_preview_id, item_sealed[0] if len(item_sealed) == 1 else item_sealed)
+            elif item_duplicates:
+                _cache_sealed_preview(clean_preview_id, item_duplicates[0])
+            sealed.extend(item_sealed)
+            duplicates.extend(item_duplicates)
+
+        except Exception as e:
+            await db.rollback()
+            for cp in file_created_paths:
+                cp.unlink(missing_ok=True)
+            failed.append({
+                "preview_id": pid,
+                "filename": final_display_name if 'final_display_name' in locals() else (original_name or staged_file.name),
+                "error": str(e),
+            })
+
+    if settings.enable_cognitive_orchestration and sealed:
+        background_tasks.add_task(_run_orchestration_after_upload, str(case_uuid))
+
+    return {
+        "status": "batch_completed",
+        "message": f"{len(sealed)} evidence file(s) sealed into Section 63 BSA chain of custody",
+        "sealed_count": len(sealed),
+        "duplicate_count": len(duplicates),
+        "failed_count": len(failed),
+        "sealed": sealed,
+        "duplicates": duplicates,
+        "failed": failed,
+    }
+
+
+# ── Direct Upload Endpoint (Backward-Compatible) ──────────────────────────────
 
 @router.post("/upload")
 async def upload_evidence(
@@ -1120,4 +2019,59 @@ async def download_evidence(
             "X-Evidence-SHA256": ev_file.sha256_hash,
         },
     )
+
+
+@router.post("/{case_id}/{evidence_id}/retry")
+@router.post("/{case_id}/files/{evidence_id}/retry")
+async def retry_evidence_processing(
+    case_id: str,
+    evidence_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """
+    Retry parsing and background processing on an already-sealed EvidenceFile.
+    Atomically clears previous partial events and mentions for this evidence file to prevent duplicates.
+    Preserves the original SHA-256 hash and Section 63 BSA cryptographic chain of custody.
+    """
+    case = await require_case_access(db, current, case_id, write=True)
+    try:
+        ev_uuid = uuid.UUID(str(evidence_id))
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid evidence UUID")
+
+    ev_file = await db.get(EvidenceFile, ev_uuid)
+    if not ev_file or ev_file.case_id != case.id:
+        raise HTTPException(404, "Evidence file not found in this case")
+
+    # Clean up prior partial events and mentions from this evidence file
+    # to maintain strict 0-duplicate invariant
+    existing_event_ids = (await db.execute(
+        select(EvidenceEvent.id).where(EvidenceEvent.evidence_file_id == ev_uuid)
+    )).scalars().all()
+    if existing_event_ids:
+        await db.execute(
+            delete(EntityMention).where(EntityMention.evidence_event_id.in_(existing_event_ids))
+        )
+        await db.execute(
+            delete(EvidenceEvent).where(EvidenceEvent.evidence_file_id == ev_uuid)
+        )
+
+    ev_file.upload_status = "pending"
+    ev_file.parse_error = None
+    await db.commit()
+
+    background_tasks.add_task(_process_evidence_file, str(ev_file.id), str(ev_file.storage_path))
+    await _audit(db, current, "EVIDENCE_PROCESSING_RETRIED", str(case.id), {
+        "evidence_id": str(ev_file.id),
+        "filename": ev_file.original_name,
+    })
+
+    return {
+        "status": "processing",
+        "message": f"Processing restarted for {ev_file.original_name}",
+        "evidence_id": str(ev_file.id),
+    }
+
 

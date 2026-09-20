@@ -156,9 +156,9 @@ function computeTimeline(p: number) {
     isVisible: false,
     tag: calcLayer(p, 0.76, 0.79, 0.85, 0.88),
     headline: calcLayer(p, 0.77, 0.80, 0.85, 0.88),
-    subheadline: calcLayer(p, 0.78, 0.81, 0.83, 0.86),
-    description: calcLayer(p, 0.79, 0.82, 0.82, 0.85),
-    detail: calcLayer(p, 0.79, 0.82, 0.82, 0.85),
+    subheadline: calcLayer(p, 0.78, 0.81, 0.84, 0.87),
+    description: calcLayer(p, 0.79, 0.82, 0.84, 0.87),
+    detail: calcLayer(p, 0.79, 0.82, 0.84, 0.87),
   };
 
   // Breathing Window 5 [0.88 - 0.93]: Planar alignment into 2D isometric layout & framing brackets
@@ -376,7 +376,6 @@ export function StoryNarrative({ storyProgress, onReplay }: Props) {
             <p
               className={s.subheadline}
               style={{
-                color: 'var(--text-primary)',
                 opacity: ch2.subheadline.opacity,
                 transform: `translate3d(0, ${ch2.subheadline.yOffset}px, 0)`,
                 filter: `blur(${ch2.subheadline.blur}px)`,
@@ -398,10 +397,10 @@ export function StoryNarrative({ storyProgress, onReplay }: Props) {
         </div>
       )}
 
-      {/* ── CHAPTER 03: THE GRAPH (Upper-left; dominates center and depth) ── */}
+      {/* ── CHAPTER 03: THE GRAPH (Left-aligned; matches chapters 2, 4, 5) ── */}
       {ch3.isVisible && (
         <div
-          className={`${s.chapterLayer} ${s.chapterLayerUpperLeft}`}
+          className={`${s.chapterLayer} ${s.chapterLayerLeft}`}
           style={{
             pointerEvents: ch3.headline.opacity > 0.4 ? 'auto' : 'none',
           }}
@@ -431,7 +430,6 @@ export function StoryNarrative({ storyProgress, onReplay }: Props) {
             <p
               className={s.subheadline}
               style={{
-                color: 'var(--text-primary)',
                 opacity: ch3.subheadline.opacity,
                 transform: `translate3d(0, ${ch3.subheadline.yOffset}px, 0)`,
                 filter: `blur(${ch3.subheadline.blur}px)`,
@@ -505,7 +503,6 @@ export function StoryNarrative({ storyProgress, onReplay }: Props) {
             <p
               className={s.subheadline}
               style={{
-                color: 'var(--text-primary)',
                 opacity: ch4.subheadline.opacity,
                 transform: `translate3d(0, ${ch4.subheadline.yOffset}px, 0)`,
                 filter: `blur(${ch4.subheadline.blur}px)`,
@@ -588,7 +585,6 @@ export function StoryNarrative({ storyProgress, onReplay }: Props) {
             <p
               className={s.subheadline}
               style={{
-                color: 'var(--text-primary)',
                 opacity: ch5.subheadline.opacity,
                 transform: `translate3d(0, ${ch5.subheadline.yOffset}px, 0)`,
                 filter: `blur(${ch5.subheadline.blur}px)`,
@@ -673,7 +669,6 @@ export function StoryNarrative({ storyProgress, onReplay }: Props) {
             <p
               className={s.subheadline}
               style={{
-                color: 'var(--text-primary)',
                 opacity: ch6.subheadline.opacity,
                 transform: `translate3d(0, ${ch6.subheadline.yOffset}px, 0)`,
                 filter: `blur(${ch6.subheadline.blur}px)`,

@@ -229,7 +229,10 @@ class QueryPlanner:
         adversarial_keywords = [
             "defence", "defense", "alternative explanation", "alibi", "reasonable doubt",
             "challenge", "cross-examin", "red-team", "flaw", "weakness", "stress-test",
-            "innocent explanation", "prosecution gap",
+            "innocent explanation", "prosecution gap", "ignore previous instructions",
+            "ignore all instructions", "system prompt", "system override", "jailbreak",
+            "you are now", "developer mode", "bypass rules", "forget instructions",
+            "prompt injection", "override system",
         ]
         if any(k in q_lower for k in adversarial_keywords):
             return QueryIntentType.ADVERSARIAL
@@ -255,7 +258,7 @@ class QueryPlanner:
         relational_keywords = [
             "connected", "connection", "connect", "relat", "link", "hidden link", "network",
             "associate", "path between", "common neighbor", "bridge", "mule ring", "syndicate",
-            "how is", "why is",
+            "how is", "how are", "why is",
         ]
         if any(k in q_lower for k in relational_keywords) and (len(entities) >= 1 or "connected" in q_lower):
             return QueryIntentType.RELATIONAL
@@ -272,9 +275,10 @@ class QueryPlanner:
         # 6. General / Summary
         general_keywords = [
             "summarize", "summary", "overview", "case", "help", "hello", "hi", "namaste",
-            "explain case", "what is this case", "status",
+            "explain case", "what is this case", "status", "brief", "briefing", "tell me about",
+            "facts of the case", "case brief", "synopsis", "case details", "background",
         ]
-        if any(k in q_lower for k in general_keywords) or not entities:
+        if any(k in q_lower for k in general_keywords):
             return QueryIntentType.GENERAL
 
         return QueryIntentType.FACTUAL

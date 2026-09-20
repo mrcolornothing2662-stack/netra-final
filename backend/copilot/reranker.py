@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Protocol, Sequence, Set, Tuple, Un
 
 from .config import CopilotConfig, get_copilot_config
 from .query_planner import QueryPlanner
-from .schemas import FusedItem, ModalityType, QueryPlan
+from .schemas import FusedItem, ModalityType, QueryPlan, QueryIntentType
 
 logger = logging.getLogger(__name__)
 
@@ -354,26 +354,7 @@ class Reranker:
                         signal += 0.15
                         break
 
-        # 2. Relational & Graph Intent
-        relational_keywords = (
-            "relationship", "relationships", "connect", "connected", "connects",
-            "connection", "link", "links", "linked", "between", "network", "associate", "associated"
-        )
-        is_relational_query = (
-            intent == "relational"
-            or any(kw in query_lower for kw in relational_keywords)
-        )
-        if is_relational_query:
-            is_graph_relational = (
-                ModalityType.GRAPH in item.modalities
-                or "[graph" in item_text_lower
-                or "relationship_type" in payload
-                or ("source" in payload and "target" in payload)
-            )
-            if is_graph_relational:
-                signal += 0.35
-
-        # 3. Temporal & Timeline Intent
+        # 2. Temporal & Timeline Intent
         temporal_keywords = (
             "timeline", "chronology", "sequence", "happened", "between", "when",
             "after", "before", "august", "january", "february", "march",
@@ -392,6 +373,29 @@ class Reranker:
                 or "event_timestamp" in payload
             )
             if is_timeline_event:
+                signal += 0.40
+                ev_type = str(payload.get("event_type") or "").lower()
+                if any(k in ev_type for k in ("bank", "call", "location", "network", "seizure", "document")):
+                    signal += 0.25
+
+        # 3. Relational & Graph Intent
+        relational_keywords = (
+            "relationship", "relationships", "connect", "connected", "connects",
+            "connection", "link", "links", "linked", "network", "associate", "associated"
+        )
+        is_relational_query = (
+            intent == "relational"
+            or (not is_temporal_query and "between" in query_lower)
+            or any(kw in query_lower for kw in relational_keywords)
+        )
+        if is_relational_query:
+            is_graph_relational = (
+                ModalityType.GRAPH in item.modalities
+                or "[graph" in item_text_lower
+                or "relationship_type" in payload
+                or ("source" in payload and "target" in payload)
+            )
+            if is_graph_relational:
                 signal += 0.35
 
         # 4. Communication Intent
@@ -457,6 +461,13 @@ class Reranker:
         # Budget limits
         candidate_budget = self.config.reranker_candidate_k
         final_budget = limit or self.config.reranker_final_k
+        if (
+            active_plan.intent in (QueryIntentType.TEMPORAL, "temporal")
+            or active_plan.time_window_start is not None
+            or "happened" in active_plan.original_query.lower()
+        ):
+            candidate_budget = max(candidate_budget, 50)
+            final_budget = max(final_budget, 25)
 
         # Truncate candidates to evaluation budget
         eval_candidates = candidates[:candidate_budget]

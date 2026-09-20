@@ -29,6 +29,7 @@ else:
         pool_size=settings.db_pool_size,
         max_overflow=settings.db_max_overflow,
         pool_pre_ping=True,
+        pool_recycle=1800,
         echo=settings.debug,
     )
 
@@ -65,3 +66,5 @@ async def db_context() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+        finally:
+            await session.close()

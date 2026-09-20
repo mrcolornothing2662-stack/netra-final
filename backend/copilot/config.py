@@ -136,8 +136,15 @@ class CopilotConfig(BaseSettings):
     # Generation
     # ──────────────────────────────────────────────────────────────────────
 
-    llm_provider: str = Field(default="offline")
-    llm_model: str = Field(default="netra-grounded-fallback")
+    llm_provider: str = Field(
+        default_factory=lambda: os.getenv("NETRA_COPILOT_LLM_PROVIDER") or os.getenv("LLM_PROVIDER") or "ollama"
+    )
+    llm_model: str = Field(
+        default_factory=lambda: os.getenv("NETRA_COPILOT_LLM_MODEL") or os.getenv("LLM_MODEL") or os.getenv("OLLAMA_MODEL") or "llama3.2:1b"
+    )
+    ollama_base_url: str = Field(
+        default_factory=lambda: os.getenv("NETRA_COPILOT_OLLAMA_BASE_URL") or os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434"
+    )
 
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     max_output_tokens: int = Field(default=2000, ge=128, le=16000)

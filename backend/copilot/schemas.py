@@ -186,6 +186,7 @@ class CaseContextSnapshot(BaseModel):
     total_entities: int = 0
     total_events: int = 0
     total_findings: int = 0
+    evidence_files: List[str] = Field(default_factory=list)
 
 
 class AssembledContext(BaseModel):

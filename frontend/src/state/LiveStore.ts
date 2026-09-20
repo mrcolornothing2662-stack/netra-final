@@ -154,14 +154,23 @@ class LiveStoreImpl {
       return;
     }
 
-    // Real case: reset active state up-front to prevent cross-case contamination.
-    // Missing data stays empty — it is NEVER backfilled with demo content.
-    this.activeEvidence = [];
-    this.activeGraph = { nodes: [], connections: [], entities: [] };
-    this.activeTimeline = [];
-    this.activeCaseSummary = null;
-
     const tid = (caseId || "").toLowerCase();
+
+    // Only reset state up-front when switching to a different case to prevent UI flicker
+    const isSameCase = Boolean(
+      this.activeCase && (
+        this.activeCase.id.toLowerCase() === tid ||
+        this.activeCase.uuid?.toLowerCase() === tid ||
+        this.activeCase.case_number?.toLowerCase() === tid
+      )
+    );
+
+    if (!isSameCase) {
+      this.activeEvidence = [];
+      this.activeGraph = { nodes: [], connections: [], entities: [] };
+      this.activeTimeline = [];
+      this.activeCaseSummary = null;
+    }
     let matched = this.cases.find(c => {
       if (c.source_type === "SYNTHETIC_DEMO") return false;
       const cid = (c.id || "").toLowerCase();
@@ -170,8 +179,10 @@ class LiveStoreImpl {
       return cid === tid || cnum === tid || cuuid === tid || (cid.length > 3 && tid.includes(cid)) || (tid.length > 3 && cid.includes(tid));
     });
 
-    this.activeCase = matched || null;
-    this.notify();
+    this.activeCase = matched || this.activeCase || null;
+    if (!isSameCase) {
+      this.notify();
+    }
 
     try {
       // 1. Fetch case summary
@@ -284,6 +295,31 @@ class LiveStoreImpl {
       this.loading = false;
       this.notify();
       throw err;
+    }
+  }
+
+  async refreshEvidence(caseId: string): Promise<Evidence[]> {
+    try {
+      const refreshed = await evidenceApi.list(caseId);
+      this.activeEvidence = refreshed.map(adaptEvidenceFile);
+      if (this.activeCase) {
+        this.activeCase.evidence = this.activeEvidence.length;
+      }
+      const matchCase = this.cases.find(c => c.id === caseId || c.case_number === caseId);
+      if (matchCase) {
+        matchCase.evidence = this.activeEvidence.length;
+      }
+      casesApi.summary(caseId).then(summary => {
+        if (summary) {
+          this.activeCaseSummary = summary;
+          this.notify();
+        }
+      }).catch(() => {});
+      this.notify();
+      return this.activeEvidence;
+    } catch (err) {
+      console.error("Failed to refresh evidence:", err);
+      return this.activeEvidence;
     }
   }
 }

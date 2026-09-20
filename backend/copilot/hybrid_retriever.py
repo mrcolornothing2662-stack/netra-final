@@ -35,6 +35,7 @@ from .schemas import (
     GraphEdgeSnippet,
     GraphNodeSnippet,
     ModalityType,
+    QueryIntentType,
     QueryPlan,
     RetrievedItem,
 )
@@ -74,8 +75,17 @@ class HybridRetriever:
     # 1. RRF Scoring & Deduplication
     # ─────────────────────────────────────────────────────────────────────────
 
-    def get_modality_weight(self, modality: ModalityType) -> float:
-        """Fetch configured RRF weight for the given retrieval modality."""
+    def get_modality_weight(self, modality: ModalityType, plan: Optional[QueryPlan] = None) -> float:
+        """Fetch configured RRF weight for the given retrieval modality, adaptive to plan intent."""
+        if plan:
+            if plan.intent == QueryIntentType.TEMPORAL:
+                if modality == ModalityType.TIMELINE:
+                    return 3.0
+                elif modality == ModalityType.STRUCTURED:
+                    return 1.2
+            elif plan.intent == QueryIntentType.RELATIONAL:
+                if modality == ModalityType.GRAPH:
+                    return 2.5
         if modality == ModalityType.VECTOR:
             return float(self.config.vector_rrf_weight)
         elif modality == ModalityType.GRAPH:
@@ -86,13 +96,13 @@ class HybridRetriever:
             return float(self.config.timeline_rrf_weight)
         return 1.0
 
-    def compute_rrf_score(self, rank: int, modality: ModalityType) -> float:
+    def compute_rrf_score(self, rank: int, modality: ModalityType, plan: Optional[QueryPlan] = None) -> float:
         """
         Weighted Reciprocal Rank Fusion contribution:
         score = weight / (k + rank)
         """
         k = self.config.rrf_k
-        w = self.get_modality_weight(modality)
+        w = self.get_modality_weight(modality, plan=plan)
         return w / (k + rank)
 
     @staticmethod
@@ -153,6 +163,7 @@ class HybridRetriever:
         case_id: str,
         candidate_lists: Dict[ModalityType, Sequence[RetrievedItem]],
         limit: Optional[int] = None,
+        plan: Optional[QueryPlan] = None,
     ) -> List[FusedItem]:
         """
         Merge candidate lists from all modalities into a deduplicated, RRF-ranked list.
@@ -192,7 +203,7 @@ class HybridRetriever:
                     continue
 
                 dedup_key = self.get_dedup_key(item, clean_case)
-                score_contrib = self.compute_rrf_score(rank_idx, modality)
+                score_contrib = self.compute_rrf_score(rank_idx, modality, plan=plan)
 
                 # 1. Accumulate RRF score
                 rrf_scores[dedup_key] = rrf_scores.get(dedup_key, 0.0) + score_contrib
@@ -305,7 +316,7 @@ class HybridRetriever:
         except (ValueError, TypeError):
             return []
 
-        max_limit = limit or self.config.timeline_top_k
+        max_limit = max(limit or 0, self.config.timeline_top_k, 25)
         q = select(EvidenceEvent).where(
             EvidenceEvent.case_id == case_uuid,
             EvidenceEvent.event_timestamp.is_not(None),
@@ -316,11 +327,21 @@ class HybridRetriever:
         if plan.time_window_end:
             q = q.where(EvidenceEvent.event_timestamp <= _normalize_dt(plan.time_window_end))
 
-        q = q.order_by(EvidenceEvent.event_timestamp.asc()).limit(max_limit)
-        events = (await db.execute(q)).scalars().all()
+        from sqlalchemy import case as sql_case
+        priority_order = sql_case(
+            (EvidenceEvent.event_type.in_(["bank_txn", "call", "location_timeline", "network_log", "seizure_memo", "document_text"]), 1),
+            else_=2
+        )
+        q = q.order_by(priority_order.asc(), EvidenceEvent.event_timestamp.asc()).limit(max(max_limit * 4, 100))
+        raw_events = (await db.execute(q)).scalars().all()
 
-        if not events:
+        if not raw_events:
             return []
+
+        priority_types = {"bank_txn", "call", "location_timeline", "network_log", "seizure_memo", "document_text"}
+        milestones = [e for e in raw_events if e.event_type in priority_types][:max_limit]
+        chats = [e for e in raw_events if e.event_type not in priority_types][:3]
+        events = sorted(milestones + chats, key=lambda e: e.event_timestamp or datetime.datetime.min.replace(tzinfo=datetime.timezone.utc))
 
         # Load file map for source doc provenance
         ev_files = (await db.execute(select(EvidenceFile).where(EvidenceFile.case_id == case_uuid))).scalars().all()
@@ -485,9 +506,9 @@ class HybridRetriever:
         # 4. Timeline Retrieval
         timeline_needed = (
             "timeline" in plan.target_modalities
-            or plan.intent in ("temporal",)
+            or plan.intent in (QueryIntentType.TEMPORAL, "temporal")
             or plan.time_window_start is not None
-            or any(kw in plan.original_query.lower() for kw in ("timeline", "sequence", "chronology", "when", "after", "before"))
+            or any(kw in plan.original_query.lower() for kw in ("timeline", "sequence", "chronology", "when", "after", "before", "happened"))
         )
         if timeline_needed:
             try:
@@ -502,10 +523,15 @@ class HybridRetriever:
                 logger.warning("Timeline retrieval encountered error in HybridRetriever: %s", e)
 
         # 5. Weighted RRF Fusion
+        retrieval_limit = limit
+        if plan.intent in (QueryIntentType.TEMPORAL, "temporal") or plan.time_window_start is not None:
+            retrieval_limit = max(limit or 0, 35)
+
         fused_items = self.fuse_candidates(
             case_id=clean_case,
             candidate_lists=candidate_lists,
-            limit=limit,
+            limit=retrieval_limit,
+            plan=plan,
         )
 
         diagnostics = {

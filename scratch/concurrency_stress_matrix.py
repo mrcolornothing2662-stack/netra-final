@@ -509,7 +509,7 @@ async def run_tier_2_concurrent_investigations(
                 )
             ).scalar_one_or_none()
 
-    unassigned_token, _ = _create_token(
+    unassigned_token, *_ = _create_token(
         str(other_officer.id), other_officer.role
     )
     unassigned_headers = {"Authorization": f"Bearer {unassigned_token}"}

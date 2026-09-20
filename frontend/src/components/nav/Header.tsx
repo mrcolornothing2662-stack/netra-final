@@ -1,5 +1,6 @@
 import { useLocation, useOutletContext } from "react-router-dom";
 import { Icon } from "../icons";
+import { ThemeToggle } from "../common/ThemeToggle";
 import { getStoredUser, logout } from "../../api/client";
 import { useLiveStore } from "../../state/useLiveStore";
 import s from "./nav.module.css";
@@ -88,6 +89,8 @@ export function Header() {
           <span className={s.searchPh}>Search intelligence…</span>
           <kbd>⌘K</kbd>
         </button>
+
+        <ThemeToggle />
 
         <div className={s.userCluster}>
           <span className={s.avatarInit} aria-hidden="true">{initialsOf(displayName)}</span>

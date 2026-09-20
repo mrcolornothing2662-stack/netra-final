@@ -26,5 +26,6 @@ export function useLiveStore() {
     createCase: (payload: Parameters<typeof liveStore.createCase>[0]) => liveStore.createCase(payload),
     fetchCaseDetails: (id: string) => liveStore.fetchCaseDetails(id),
     uploadEvidence: (id: string, files: File[], src?: string) => liveStore.uploadEvidence(id, files, src),
+    refreshEvidence: (id: string) => liveStore.refreshEvidence(id),
   };
 }

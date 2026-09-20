@@ -36,6 +36,9 @@ backend/pgsql/
 *.db
 *.sqlite3
 *.ses
+scratch/*.sql
+*.sql.gz
+*.dump
 
 # Machine Learning Artifacts & Embeddings
 backend/artifacts/cyberdrishtilm/
@@ -48,6 +51,7 @@ backend/training_data/
 backend/uploads/
 backend/reports/
 *.pdf
+!scratch/demo_evidence/*.pdf
 
 # Node / Frontend Build Artifacts
 frontend/node_modules/

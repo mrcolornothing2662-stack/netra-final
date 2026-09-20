@@ -126,8 +126,8 @@ async def audit_multi_tenant_idor(client: httpx.AsyncClient, session: AsyncSessi
     await session.commit()
 
     # Generate JWTs
-    token_a, _ = _create_token(str(uid_a), "io")
-    token_b, _ = _create_token(str(uid_b), "io")
+    token_a, *_ = _create_token(str(uid_a), "io")
+    token_b, *_ = _create_token(str(uid_b), "io")
     headers_a = {"Authorization": f"Bearer {token_a}"}
     headers_b = {"Authorization": f"Bearer {token_b}"}
 
@@ -168,7 +168,7 @@ async def audit_multi_tenant_idor(client: httpx.AsyncClient, session: AsyncSessi
     else:
         log_fail(f"Unauthorized mutation permitted or revealed: {r_mutate.status_code}")
 
-    # Supervisory Override: Admin CAN supervise Case B
+    # Separation of Duties: Admin WITHOUT assignment receives 404 (Default Denial)
     r_admin_login = await client.post(
         "/api/v1/auth/login", data={"username": "admin", "password": "password123"}
     )
@@ -179,11 +179,32 @@ async def audit_multi_tenant_idor(client: httpx.AsyncClient, session: AsyncSessi
     admin_token = r_admin_login.json()["access_token"]
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
+    r_admin_denied = await client.get(f"/api/v1/cases/{cid_b}", headers=admin_headers)
+    if r_admin_denied.status_code == 404:
+        log_pass("Separation of duties verified: Admin without assignment denied access (404 Not Found)")
+    else:
+        log_fail(f"Admin should receive 404 without assignment, got: {r_admin_denied.status_code}")
+
+    # Now add Admin as authorized CaseCollaborator supervisor
+    from db.models import CaseCollaborator
+    admin_user = (await session.execute(select(User).where(User.username == "admin"))).scalar_one()
+    collab = CaseCollaborator(
+        case_id=cid_b,
+        user_id=admin_user.id,
+        role="supervisor",
+        assigned_by=uid_b,
+    )
+    session.add(collab)
+    await session.commit()
+
     r_admin_access = await client.get(f"/api/v1/cases/{cid_b}", headers=admin_headers)
     if r_admin_access.status_code == 200:
-        log_pass("Admin role supervisory override verified: cross-case access permitted for admin")
+        log_pass("Admin supervisory access verified: permitted once explicitly added as CaseCollaborator (200 OK)")
     else:
-        log_fail(f"Admin supervisory access failed: {r_admin_access.status_code}")
+        log_fail(f"Admin supervisory access failed after collaboration grant: {r_admin_access.status_code}")
+
+    # Clean up collaborator
+    await session.execute(delete(CaseCollaborator).where(CaseCollaborator.case_id == cid_b))
 
     # Clean up test cases and users
     await session.execute(delete(Case).where(Case.id.in_([cid_a, cid_b])))
@@ -207,7 +228,7 @@ async def audit_jwt_cryptographic_security(client: httpx.AsyncClient):
     print("=" * 80)
 
     # 1. Signature Tampering Test
-    valid_token, _ = _create_token(str(uuid.uuid4()), "io")
+    valid_token, *_ = _create_token(str(uuid.uuid4()), "io")
     parts = valid_token.split(".")
     tampered_signature = parts[0] + "." + parts[1] + "." + (parts[2][:-4] + "AAAA")
     r = await client.get(
@@ -363,6 +384,7 @@ async def audit_path_traversal_and_ingestion(
     print("=" * 80)
 
     # Create temporary case for file upload
+    admin_user = (await session.execute(select(User).where(User.username == "admin"))).scalar_one()
     cid = uuid.uuid4()
     case = Case(
         id=cid,
@@ -370,6 +392,7 @@ async def audit_path_traversal_and_ingestion(
         title="Path Traversal Penetration Test Case",
         status="open",
         priority="medium",
+        assigned_officer_id=admin_user.id,
     )
     session.add(case)
     await session.commit()

@@ -30,108 +30,260 @@ async def copilot_endpoint(
     current: User = Depends(get_current_user),
 ):
     """
-    AI Daya RAG & Investigation Copilot (generative + DB intelligence).
-    Analyzes case evidence, call logs, financial transactions, and suspect entities.
-    Augmented with Feature 09: Output Verifier (Semantic CRAG Firewall).
+    NETRA Forensic Copilot endpoint.
+    Executes full multi-modal RAG pipeline:
+      User Query
+      -> Query Understanding (QueryPlanner)
+      -> Multi-Modal Hybrid Retrieval (Vector, Graph, Structured, Timeline)
+      -> Weighted RRF Fusion
+      -> Candidate Reranking & Forensic Signal Scoring
+      -> Epistemic Context Building (Observed vs Inferred)
+      -> Grounded Prompt Synthesis
+      -> Offline-Safe Generator Execution
+      -> Fact & Citation Claim Verification
+      -> Formatted Forensic Response
     """
+    import re
     c = await require_case_access(db, current, case_id)
-    from rag.copilot import copilot_query
-    result = await copilot_query(db, str(c.id), body.question, top_k=body.top_k)
+    clean_case_id = str(c.id)
 
-    # ── Feature 09: Output Verifier (Semantic CRAG Firewall) ─────────────────
-    try:
-        from cognitive.verifier import load_statutory_db, OutputVerifier
-        from cognitive import data_path
-        from db.models import Entity
+    from copilot.config import get_copilot_config
+    from copilot.query_planner import QueryPlanner
+    from copilot.hybrid_retriever import HybridRetriever
+    from copilot.vector_store import VectorStore
+    from copilot.graph_retriever import GraphRetriever
+    from copilot.structured_retriever import StructuredRetriever
+    from copilot.reranker import Reranker
+    from copilot.context_builder import ContextBuilder
+    from copilot.prompt_builder import PromptBuilder
+    from copilot.generator import Generator
+    from copilot.claim_verifier import ClaimVerifier
+    from copilot.schemas import GraphEdgeSnippet, StructuredRecordSnippet, GraphNodeSnippet
 
-        ent_rows = (await db.execute(
-            select(Entity.canonical_value, Entity.entity_type).where(Entity.case_id == c.id)
-        )).all()
+    import time
+    t_start = time.perf_counter()
 
-        case_facts: dict[str, list[str]] = {
-            "amounts": [],
-            "phones": [],
-            "upis": [],
-            "accounts": [],
-            "ips": [],
-            "devices": [],
-            "names": [],
-        }
-        for val, etype in ent_rows:
-            if not val:
-                continue
-            etype_str = (etype or "").upper()
-            if etype_str in ("PHONE", "MOBILE"):
-                case_facts["phones"].append(val)
-            elif etype_str in ("UPI", "VPA"):
-                case_facts["upis"].append(val)
-            elif etype_str in ("AMOUNT", "MONEY", "INR"):
-                case_facts["amounts"].append(val)
-            elif etype_str in ("ACCOUNT", "BANK_ACC"):
-                case_facts["accounts"].append(val)
-            elif etype_str in ("IP", "IPV4"):
-                case_facts["ips"].append(val)
-            elif etype_str in ("DEVICE", "DEV"):
-                case_facts["devices"].append(val)
-            else:
-                case_facts["names"].append(val)
+    cfg = get_copilot_config()
+    planner = QueryPlanner()
+    plan = planner.plan(body.question)
 
-        statutory_db = load_statutory_db(data_path("statutory_db.json"))
-        verifier = OutputVerifier(statutory_db=statutory_db, case_facts=case_facts)
-        answer = result.get("answer", "")
-        critique = verifier.critique(answer)
+    v_store = VectorStore(config=cfg)
+    g_retriever = GraphRetriever(config=cfg)
+    s_retriever = StructuredRetriever(config=cfg)
+    hybrid = HybridRetriever(cfg, v_store, g_retriever, s_retriever)
 
-        flags = []
-        for viol in critique.statutory_violations:
-            flags.append({
-                "severity": "error",
-                "check": "STATUTORY_VIOLATION",
-                "message": f"Section {viol.get('section')} ({viol.get('act', 'Unknown')}): {viol.get('reason', 'Statutory violation')}",
-            })
-        for gfail in critique.grounding_failures:
-            flags.append({
-                "severity": "warning",
-                "check": "GROUNDING_FAILURE",
-                "message": gfail.get("detail", f"Ungrounded claim: {gfail.get('value')}"),
-            })
-        for cdet in critique.canned_detections:
-            flags.append({
-                "severity": "info",
-                "check": "CANNED_MATCH",
-                "message": cdet.get("detail", "High similarity to canned template."),
-            })
+    fused_items, diag = await hybrid.retrieve(
+        db=db,
+        case_id=clean_case_id,
+        plan=plan,
+        limit=max(body.top_k, 25),
+    )
 
-        result["verification"] = {
-            "passed": critique.passed,
-            "governance_verdict": critique.governance_verdict,
-            "governance_reasons": critique.governance_reasons,
-            "flags": flags,
-            "citations": critique.citations,
-            "grounded_spans": critique.grounded_spans,
-            "statutory_violations": critique.statutory_violations,
-            "grounding_failures": critique.grounding_failures,
-            "admissibility_disclaimer": critique.admissibility_disclaimer,
-            "correction_instructions": critique.correction_instructions,
-        }
-    except Exception as exc:
-        result["verification"] = {
-            "passed": True,
-            "flags": [],
-            "note": f"Verification deferred: {exc}",
-        }
+    reranker = Reranker(config=cfg)
+    reranked_items = await reranker.rerank(
+        query=body.question,
+        candidates=fused_items,
+        plan=plan,
+    )
+    t_retrieval = time.perf_counter()
 
-    return result
+    # Extract domain structures from reranked items for context building
+    edges: list[GraphEdgeSnippet] = []
+    records: list[StructuredRecordSnippet] = []
+    nodes: list[GraphNodeSnippet] = []
+
+    for it in reranked_items:
+        p = it.raw_payload or {}
+        if "source" in p and "target" in p:
+            edges.append(
+                GraphEdgeSnippet(
+                    source_canonical=str(p["source"]),
+                    target_canonical=str(p["target"]),
+                    relationship_type=str(p.get("type") or p.get("relationship_type")),
+                    confidence=float(p.get("confidence", 1.0)),
+                    epistemic_status=str(p.get("epistemic_status") or it.epistemic_status or "OBSERVED"),
+                    citations=p.get("citations", []),
+                )
+            )
+        elif it.text.startswith("[GRAPH "):
+            m = re.search(
+                r"\[GRAPH\s+([A-Z_]+)\]\s+(.*?)\s+->\s+(.*?)\s+->\s+(.*?)(?:\s+\(confidence=([0-9.]+)\))?$",
+                it.text.strip(),
+            )
+            if m:
+                edges.append(
+                    GraphEdgeSnippet(
+                        source_canonical=m.group(2).strip(),
+                        target_canonical=m.group(4).strip(),
+                        relationship_type=m.group(3).strip(),
+                        confidence=float(m.group(5)) if m.group(5) else 1.0,
+                        epistemic_status=m.group(1).strip(),
+                        citations=it.citations or [],
+                    )
+                )
+
+        if "event_id" in p or "finding_id" in p or any(
+            it.text.startswith(f"[{tag}]")
+            for tag in (
+                "TRANSACTION",
+                "WHATSAPP",
+                "CALL",
+                "LOCATION",
+                "TIMELINE",
+                "FINDING",
+                "DEVICE",
+                "NETWORK",
+            )
+        ):
+            records.append(
+                StructuredRecordSnippet(
+                    record_id=str(p.get("event_id") or p.get("finding_id") or it.id),
+                    table_name="findings" if "finding_id" in p or "[FINDING]" in it.text else "evidence_events",
+                    record_type=str(p.get("event_type") or p.get("finding_type") or "record"),
+                    timestamp=None,
+                    summary_text=it.text,
+                    source_file=it.source_file,
+                    source_line=it.source_line,
+                    source_page=it.source_page,
+                    exact_payload=p,
+                )
+            )
+
+        if "canonical_value" in p and "entity_type" in p:
+            nodes.append(
+                GraphNodeSnippet(
+                    entity_id=str(p.get("entity_id") or it.id),
+                    canonical_value=str(p["canonical_value"]),
+                    entity_type=str(p["entity_type"]),
+                    risk_score=float(p.get("risk_score") or 0.0),
+                    bridge_score=float(p.get("bridge_score") or 0.0),
+                )
+            )
+
+    c_builder = ContextBuilder(config=cfg)
+    case_snapshot = await c_builder.build_case_snapshot(db=db, case_id=clean_case_id)
+    assembled_context = c_builder.build_context(
+        case_snapshot=case_snapshot,
+        fused_items=reranked_items,
+        graph_nodes=nodes,
+        graph_edges=edges,
+        structured_records=records,
+    )
+
+    p_builder = PromptBuilder(config=cfg)
+    gen_prompt = p_builder.build_prompt(query=plan, context=assembled_context)
+    t_context = time.perf_counter()
+
+    generator = Generator(config=cfg)
+    gen_resp = await generator.generate(prompt=gen_prompt)
+    t_generation = time.perf_counter()
+
+    verifier = ClaimVerifier(config=cfg)
+    verified = verifier.verify(response=gen_resp, context=assembled_context)
+    t_verify = time.perf_counter()
+
+    # Build citations list with provenance
+    citations_out = []
+    seen_citations = set()
+    for rank, it in enumerate(reranked_items, start=1):
+        if it.source_file and it.source_file not in ("Unknown", "Case Graph (Entities)"):
+            c_key = (it.source_file, it.source_line or "", it.source_page or "")
+            if c_key not in seen_citations:
+                seen_citations.add(c_key)
+                citations_out.append({
+                    "rank": rank,
+                    "file": it.source_file,
+                    "line": it.source_line or "",
+                    "page": it.source_page or "",
+                    "text": it.text,
+                    "verified": True,
+                    "epistemic_status": it.epistemic_status or "OBSERVED",
+                })
+
+    # Separate observed vs inferred relationships/facts
+    observed_facts = []
+    inferred_facts = []
+    for edge in edges:
+        edge_repr = f"{edge.source_canonical} -> {edge.relationship_type} -> {edge.target_canonical}"
+        if edge.epistemic_status.upper() == "INFERRED":
+            if edge_repr not in inferred_facts:
+                inferred_facts.append(edge_repr)
+        else:
+            if edge_repr not in observed_facts:
+                observed_facts.append(edge_repr)
+
+    # Calculate stage latencies
+    retrieval_ms = round((t_retrieval - t_start) * 1000.0, 2)
+    context_ms = round((t_context - t_retrieval) * 1000.0, 2)
+    generation_ms = round((t_generation - t_context) * 1000.0, 2)
+    verification_ms = round((t_verify - t_generation) * 1000.0, 2)
+    total_ms = round((t_verify - t_start) * 1000.0, 2)
+
+    return {
+        "answer": verified.text,
+        "raw_answer": gen_resp.text,
+        "citations": citations_out,
+        "observed_facts": observed_facts,
+        "inferred_facts": inferred_facts,
+        "model_used": gen_resp.model,
+        "provider": gen_resp.provider,
+        "is_generated": True,
+        "fallback_used": gen_resp.used_fallback,
+        "abstained": verified.abstained,
+        "grounded_ratio": verified.grounded_claim_ratio,
+        "grounded_claim_ratio": verified.grounded_claim_ratio,
+        "citation_count": len(citations_out),
+        "latency_ms": gen_resp.latency_ms,
+        "stage_latencies": {
+            "retrieval_ms": retrieval_ms,
+            "context_ms": context_ms,
+            "generation_ms": generation_ms,
+            "verification_ms": verification_ms,
+            "total_ms": total_ms,
+        },
+        "status": "ready",
+        "verification": {
+            "passed": verified.passed,
+            "abstained": verified.abstained,
+            "grounded_ratio": verified.grounded_claim_ratio,
+            "flags": [
+                {"severity": "warning", "check": "UNGROUNDED_CLAIM", "message": f"{c.text} ({c.reason or 'Ungrounded claim'})"}
+                for c in (verified.report.claims if verified.report else []) if not c.grounded
+            ],
+        },
+        "diagnostics": {
+            "intent": plan.intent.value if hasattr(plan.intent, "value") else str(plan.intent),
+            "target_modalities": plan.target_modalities,
+            "retrieval": diag,
+        },
+    }
 
 
 @copilot_router.get("/status")
 async def copilot_status(_: User = Depends(get_current_user)):
-    """Report real language-model availability — never a hardcoded status."""
-    from rag.copilot import probe_ai_engine
-    probe = probe_ai_engine()
+    """Report Copilot engine availability and active provider configuration."""
+    from copilot.config import get_copilot_config
+    import httpx
+    cfg = get_copilot_config()
+    ollama_online = False
+    available_models = []
+    base_url = getattr(cfg, "ollama_base_url", "http://localhost:11434").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=1.5) as client:
+            resp = await client.get(f"{base_url}/api/tags")
+            if resp.status_code == 200:
+                ollama_online = True
+                data = resp.json()
+                available_models = [m.get("name") for m in data.get("models", []) if "name" in m]
+    except Exception:
+        ollama_online = False
+
     return {
-        "ollama_online": probe["online"],
-        "model_used": probe["model_used"],
-        "provider": probe["provider"],
+        "ollama_online": ollama_online,
+        "available_models": available_models,
+        "status": "ready",
+        "model_used": cfg.llm_model,
+        "provider": cfg.llm_provider,
     }
 
 

@@ -18,7 +18,7 @@ export function StoryHUD({ storyProgress, onJumpTo }: Props) {
           <button
             key={ch.id}
             className={`${s.hudItem} ${isActive ? s.hudActive : ''}`}
-            onClick={() => onJumpTo(ch.start + 0.01)}
+            onClick={() => onJumpTo((ch.start + ch.end) / 2)}
           >
             <span className={s.hudDot} />
             <span className={s.hudLabel}>

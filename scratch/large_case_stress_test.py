@@ -79,7 +79,9 @@ async def run_stress_test():
     async with httpx.AsyncClient(base_url=BASE_URL, timeout=180.0, follow_redirects=True) as client:
         # ── 1. Authentication ─────────────────────────────────────────────────
         print("\n--- Step 1: Authentication & Case Setup ---")
-        login_res = await client.post("/api/v1/auth/login", data={"username": "admin", "password": "admin123"})
+        login_res = await client.post("/api/v1/auth/login", data={"username": "admin", "password": "password123"})
+        if login_res.status_code != 200:
+            login_res = await client.post("/api/v1/auth/login", data={"username": "admin", "password": "admin123"})
         check(login_res.status_code == 200, "Admin login successful")
         token = login_res.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
@@ -87,7 +89,8 @@ async def run_stress_test():
         # Clean up any prior test case with this title
         cases_res = await client.get("/api/v1/cases", headers=headers)
         if cases_res.status_code == 200:
-            for c in cases_res.json().get("cases", []):
+            cases_list = cases_res.json().get("items", []) or cases_res.json().get("cases", [])
+            for c in cases_list:
                 if "Operation Meridian — Large Scale Benchmark" in c.get("title", ""):
                     await client.delete(f"/api/v1/cases/{c['id']}", headers=headers)
                     print(f"  [CLEANUP] Deleted previous benchmark case: {c['id']}")
