@@ -144,16 +144,17 @@ async def require_case_access(
             )
             raise HTTPException(403, "Insufficient permissions for requested action")
 
-    # Access permitted
-    await log_case_authorization(
-        "CASE_ACCESS_ALLOWED",
-        str(case.id),
-        current,
-        {
-            "effective_role": effective_role,
-            "write": write,
-        },
-    )
+    # Access permitted — record in audit ledger for mutating operations (write=True)
+    if write:
+        await log_case_authorization(
+            "CASE_ACCESS_ALLOWED",
+            str(case.id),
+            current,
+            {
+                "effective_role": effective_role,
+                "write": write,
+            },
+        )
 
     return case
 
