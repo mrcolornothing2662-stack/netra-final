@@ -5,12 +5,13 @@ import { EASE_OUT } from "../../lib/motion";
 import s from "./case.module.css";
 
 export const CASE_TABS = [
-  { id: "overview", label: "Overview" },
+  { id: "overview", label: "Command Center" },
   { id: "notes", label: "Notes" },
   { id: "evidence", label: "Evidence" },
   { id: "entities", label: "Entities" },
   { id: "network", label: "Network" },
   { id: "timeline", label: "Timeline" },
+  { id: "lenses", label: "Forensic Lenses" },
   { id: "analysis", label: "Copilot" },
   { id: "cognitive", label: "Cognitive" },
   { id: "agent", label: "Agent" },

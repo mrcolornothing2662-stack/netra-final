@@ -111,6 +111,12 @@ async def upsert_finding(
             reason_codes=list(result.reason_codes),
             reasoning=result.reasoning,
             citations=list(result.citations),
+            supporting_refs=list(result.supporting_refs),
+            contradicting_refs=list(result.contradicting_refs),
+            missing_information=list(result.missing_information),
+            suggested_actions=list(result.suggested_actions),
+            generated_at_case_version=result.generated_at_case_version,
+            freshness_status=result.freshness_status,
             observed_at=result.observed_at,
         )
         try:
@@ -141,6 +147,12 @@ async def upsert_finding(
     existing.entity_refs = _merge_unique(existing.entity_refs, result.entity_refs)
     existing.event_refs = _merge_unique(existing.event_refs, result.event_refs)
     existing.evidence_refs = _merge_unique(existing.evidence_refs, result.evidence_refs)
+    existing.supporting_refs = _merge_unique(existing.supporting_refs or [], result.supporting_refs)
+    existing.contradicting_refs = _merge_unique(existing.contradicting_refs or [], result.contradicting_refs)
+    existing.missing_information = _merge_unique(existing.missing_information or [], result.missing_information)
+    existing.suggested_actions = _merge_unique(existing.suggested_actions or [], result.suggested_actions)
+    existing.generated_at_case_version = result.generated_at_case_version
+    existing.freshness_status = result.freshness_status
 
     new_scores: dict[str, Any] = dict(result.component_scores)
     if materially_changed:
@@ -235,6 +247,12 @@ async def upsert_findings(
                 reason_codes=list(result.reason_codes),
                 reasoning=result.reasoning,
                 citations=list(result.citations),
+                supporting_refs=list(result.supporting_refs),
+                contradicting_refs=list(result.contradicting_refs),
+                missing_information=list(result.missing_information),
+                suggested_actions=list(result.suggested_actions),
+                generated_at_case_version=result.generated_at_case_version,
+                freshness_status=result.freshness_status,
                 observed_at=result.observed_at,
             )
             db.add(row)
@@ -257,6 +275,12 @@ async def upsert_findings(
             existing.entity_refs = _merge_unique(existing.entity_refs, result.entity_refs)
             existing.event_refs = _merge_unique(existing.event_refs, result.event_refs)
             existing.evidence_refs = _merge_unique(existing.evidence_refs, result.evidence_refs)
+            existing.supporting_refs = _merge_unique(existing.supporting_refs or [], result.supporting_refs)
+            existing.contradicting_refs = _merge_unique(existing.contradicting_refs or [], result.contradicting_refs)
+            existing.missing_information = _merge_unique(existing.missing_information or [], result.missing_information)
+            existing.suggested_actions = _merge_unique(existing.suggested_actions or [], result.suggested_actions)
+            existing.generated_at_case_version = result.generated_at_case_version
+            existing.freshness_status = result.freshness_status
 
             new_scores = dict(result.component_scores)
             if materially_changed:
@@ -337,6 +361,12 @@ def serialize_finding(row: InvestigationFinding) -> dict[str, Any]:
         "reason_codes":     row.reason_codes or [],
         "reasoning":        row.reasoning,
         "citations":        row.citations or [],
+        "supporting_refs":  row.supporting_refs or [],
+        "contradicting_refs": row.contradicting_refs or [],
+        "missing_information": row.missing_information or [],
+        "suggested_actions": row.suggested_actions or [],
+        "generated_at_case_version": row.generated_at_case_version or 1,
+        "freshness_status": row.freshness_status or "CURRENT",
         "has_evidence":     bool(row.evidence_refs),
         "observed_at":      row.observed_at.isoformat() if row.observed_at else None,
         "created_at":       row.created_at.isoformat() if row.created_at else None,

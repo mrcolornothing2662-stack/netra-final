@@ -101,89 +101,25 @@ async def verify_global_audit_chain(
     db:      AsyncSession = Depends(get_db),
     current: User = Depends(get_current_user),
 ):
-    """Recompute the entire global audit chain from the genesis entry."""
-    rows = (await db.execute(select(AuditLog).order_by(AuditLog.id))).scalars().all()
-    if not rows:
-        return {"intact": True, "global_entry_count": 0, "message": "No audit entries exist yet."}
-
-    # The chain's genesis anchor is the first link, whether that is an explicit
-    # GENESIS marker row or simply the first recorded action (this deployment
-    # does not seed a synthetic GENESIS row — the first real entry is chained
-    # from "0"*64, exactly as append_audit computed it).
-    prev_hash = "0" * 64
-    genesis_hash: str = rows[0].entry_hash
-    for row in rows:
-        if row.action == "GENESIS":
-            prev_hash = row.entry_hash
-            continue
-        entry_data = json.dumps({
-            "action":      row.action,
-            "user_id":     str(row.user_id) if row.user_id else None,
-            "resource_id": row.resource_id,
-            "details":     row.details_json,
-            "timestamp":   _canonical_ts(row.event_timestamp),
-        }, sort_keys=True)
-
-        expected_hash = hashlib.sha256((prev_hash + entry_data).encode()).hexdigest()
-        if expected_hash != row.entry_hash:
-            return {
-                "intact": False,
-                "first_broken_entry_id": row.id,
-                "message": f"Chain broken at entry #{row.id}",
-            }
-        prev_hash = row.entry_hash
-
-    return {
-        "intact": True,
-        "global_entry_count": len(rows),
-        "status": "VERIFIED",
-        "genesis_hash": genesis_hash,
-        "last_hash": prev_hash,
-    }
+    """Recompute the entire global audit chain from the genesis entry using AuditVerifier."""
+    from security.audit_verifier import AuditVerifier
+    return await AuditVerifier.verify_ledger(db)
 
 
 @router.get("/verify/{case_id}")
 async def verify_audit_chain(
     case_id: str,
     db:      AsyncSession = Depends(get_db),
-    current: User = Depends(require_role("fiu_analyst", "admin")),
+    current: User = Depends(require_role("fiu_analyst", "admin", "io", "investigator", "manager")),
 ):
     """
     Recompute the entire audit chain for a given case from the genesis entry.
     Returns {"intact": true} or {"intact": false, "first_broken_entry_id": <id>}.
     """
     await require_case_access(db, current, case_id)
-    rows = (await db.execute(select(AuditLog).order_by(AuditLog.id))).scalars().all()
+    from security.audit_verifier import AuditVerifier
+    return await AuditVerifier.verify_ledger(db, case_id=case_id)
 
-    case_entry_count = sum(row.resource_id == case_id for row in rows)
-    if not rows:
-        return {"intact": True, "case_entry_count": 0, "message": "No audit entries exist yet."}
-
-    prev_hash = "0" * 64
-
-    for row in rows:
-        if row.action == "GENESIS":
-            prev_hash = row.entry_hash
-            continue
-        entry_data = json.dumps({
-            "action":      row.action,
-            "user_id":     str(row.user_id) if row.user_id else None,
-            "resource_id": row.resource_id,
-            "details":     row.details_json,
-            "timestamp":   _canonical_ts(row.event_timestamp),
-        }, sort_keys=True)
-
-        expected_hash = hashlib.sha256((prev_hash + entry_data).encode()).hexdigest()
-
-        if expected_hash != row.entry_hash:
-            return {
-                "intact": False,
-                "first_broken_entry_id": row.id,
-                "message": f"Chain broken at entry #{row.id}",
-            }
-        prev_hash = row.entry_hash
-
-    return {"intact": True, "global_entry_count": len(rows), "case_entry_count": case_entry_count}
 
 
 @router.get("/{case_id}")

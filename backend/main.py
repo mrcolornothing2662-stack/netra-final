@@ -34,6 +34,10 @@ def _validate_production_secrets() -> None:
         errors.append("SECRET_KEY is unset or still the default placeholder")
     elif len(settings.secret_key) < 32:
         errors.append(f"SECRET_KEY is only {len(settings.secret_key)} chars (minimum 32)")
+    if settings.debug:
+        errors.append("DEBUG mode must be disabled in production")
+    if "*" in settings.cors_origins:
+        errors.append("CORS wildcard '*' is prohibited in production")
     if "sqlite" in settings.database_url:
         errors.append("DATABASE_URL points at SQLite — production requires PostgreSQL")
     if not settings.initial_admin_password or settings.initial_admin_password in (
@@ -266,16 +270,27 @@ def create_app() -> FastAPI:
     # ── Middleware ────────────────────────────────────────────────────────────
     @app.middleware("http")
     async def add_security_headers(request: Request, call_next):
-        trace_id = (
-            request.headers.get("X-Request-ID")
+        import time
+        from observability.metrics import telemetry
+
+        correlation_id = (
+            request.headers.get("X-Correlation-ID")
+            or request.headers.get("X-Request-ID")
             or request.headers.get("X-Trace-ID")
             or uuid.uuid4().hex
         )
-        request.state.trace_id = trace_id
+        request.state.trace_id = correlation_id
+        request.state.correlation_id = correlation_id
 
+        start_time = time.perf_counter()
         response = await call_next(request)
-        response.headers["X-Request-ID"] = trace_id
-        response.headers["X-Trace-ID"] = trace_id
+        duration_ms = (time.perf_counter() - start_time) * 1000.0
+
+        telemetry.record_request(duration_ms=duration_ms, status_code=response.status_code)
+
+        response.headers["X-Correlation-ID"] = correlation_id
+        response.headers["X-Request-ID"] = correlation_id
+        response.headers["X-Trace-ID"] = correlation_id
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
@@ -307,10 +322,25 @@ def create_app() -> FastAPI:
     from routes.intelligence  import router as intelligence_router
     from routes.cognitive     import router as cognitive_router
     from routes.reports       import router as dossier_reports_router
+    from routes.entities      import entities_router
+    from routes.timeline      import timeline_router as unified_timeline_router
+    from routes.replay        import replay_router
+    from routes.lenses        import lenses_router
+    from routes.sync          import sync_router
+    from routes.command_center import command_center_router
+
+    from routes.security import router as security_router
 
     prefix = "/api/v1"
     app.include_router(auth_router,         prefix=f"{prefix}/auth",         tags=["auth"])
+    app.include_router(security_router,     prefix=f"{prefix}/security",     tags=["security"])
     app.include_router(cases_router,        prefix=f"{prefix}/cases",        tags=["cases"])
+    app.include_router(entities_router,     prefix=f"{prefix}/cases",        tags=["entities"])
+    app.include_router(unified_timeline_router, prefix=f"{prefix}/cases",    tags=["timeline"])
+    app.include_router(replay_router,       prefix=f"{prefix}/cases",        tags=["replay"])
+    app.include_router(lenses_router,       prefix=f"{prefix}/cases",        tags=["lenses"])
+    app.include_router(sync_router,         prefix=f"{prefix}/cases",        tags=["sync"])
+    app.include_router(command_center_router, prefix=f"{prefix}/cases",      tags=["command-center"])
     app.include_router(analytics_router,    prefix=f"{prefix}/cases",        tags=["analytics"])
     app.include_router(dossier_reports_router, prefix=prefix,                 tags=["reports"])
     app.include_router(evidence_router,     prefix=f"{prefix}/evidence",     tags=["evidence"])
@@ -328,6 +358,36 @@ def create_app() -> FastAPI:
     app.include_router(correlations_router, prefix=f"{prefix}/correlations", tags=["correlations"])
     app.include_router(intelligence_router, prefix=f"{prefix}/intelligence", tags=["intelligence"])
     app.include_router(cognitive_router,    prefix=f"{prefix}/cognitive",     tags=["cognitive"])
+
+
+    # ── NETRA V5 Investigation Brain Gateway Endpoints ──────────────────────
+    from db.models import User
+    from investigation.commands import CommandRequest, CommandResult, dispatch_command
+    from investigation.state import get_case_workspace_snapshot
+    from routes.auth import get_current_user
+    from routes.case_access import require_case_access
+
+    @app.get(f"{prefix}/cases/{{case_id}}/workspace", tags=["workspace"])
+    async def get_workspace(
+        case_id: str,
+        db: AsyncSession = Depends(get_db),
+        current: User = Depends(get_current_user),
+    ):
+        """Return unified case snapshot including permissions, metrics, findings, and activity."""
+        await require_case_access(db, current, case_id)
+        snapshot = await get_case_workspace_snapshot(db, case_id, current)
+        return snapshot
+
+    @app.post(f"{prefix}/cases/{{case_id}}/commands", tags=["commands"], response_model=CommandResult)
+    async def execute_case_command(
+        case_id: str,
+        body: CommandRequest,
+        db: AsyncSession = Depends(get_db),
+        current: User = Depends(get_current_user),
+    ):
+        """Execute a validated case mutation command through the Investigation Brain."""
+        await require_case_access(db, current, case_id, write=True)
+        return await dispatch_command(db, case_id, body, current)
 
     @app.get(f"{prefix}/ml/models", tags=["ml"])
     async def get_ml_models():
@@ -424,6 +484,17 @@ def create_app() -> FastAPI:
                 "models": models_loaded,
             },
         }
+
+    @app.get(f"{prefix}/system/health", tags=["system"])
+    async def system_health(db: AsyncSession = Depends(get_db)):
+        """System health check probe."""
+        return await health(db=db)
+
+    @app.get(f"{prefix}/system/metrics", tags=["system"])
+    async def system_metrics():
+        """Return real-time operational telemetry (latency percentiles, failure counts)."""
+        from observability.metrics import telemetry
+        return telemetry.get_metrics()
 
     return app
 

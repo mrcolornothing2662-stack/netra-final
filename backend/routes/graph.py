@@ -10,13 +10,21 @@ import uuid
 from datetime import timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Correlation, Entity, EntityMention, EvidenceEvent, Relationship, User
 from db.session import get_db
 from graph.graph_builder import graph_to_json, build_case_graph, select_relevant_subgraph
+from graph.relationships import canonical_sql_predicate
 from graph import relationship_types as RT
+from investigation.commands import CommandRequest, CommandResult, dispatch_command
+from investigation.policies import (
+    CAP_RELATIONSHIP_CONFIRM,
+    CAP_RELATIONSHIP_REJECT,
+    user_has_capability,
+)
 from routes.auth import get_current_user
 from routes.case_access import require_case_access
 
@@ -43,27 +51,31 @@ def _is_routine_event(meta: dict | None) -> bool:
 def _relationship_to_dict(rel: Relationship, value_lookup: dict[str, str]) -> dict:
     """Serialise a persisted Relationship into the API contract."""
     return {
-        "id":                str(rel.id),
-        "source":            value_lookup.get(str(rel.source_entity_id)),
-        "target":            value_lookup.get(str(rel.target_entity_id)),
-        "source_entity_id":  str(rel.source_entity_id),
-        "target_entity_id":  str(rel.target_entity_id),
-        "relationship_type": rel.relationship_type,
-        "direction":         rel.direction,
-        "epistemic_status":  rel.epistemic_status,
-        "confidence":        rel.confidence,
-        "amount":            rel.amount,
-        "event_timestamp":   rel.event_timestamp.isoformat() if rel.event_timestamp else None,
-        "first_seen":        rel.first_seen.isoformat() if rel.first_seen else None,
-        "last_seen":         rel.last_seen.isoformat() if rel.last_seen else None,
-        "observation_count": rel.observation_count,
-        "attributes":        rel.attributes or {},
-        "evidence_refs":     rel.evidence_refs or [],
-        "event_refs":        rel.event_refs or [],
-        "source_engine":     rel.source_engine,
-        "engine_version":    rel.engine_version,
-        "component_scores":  rel.component_scores or {},
-        "reason_codes":      rel.reason_codes or [],
+        "id":                  str(rel.id),
+        "source":              value_lookup.get(str(rel.source_entity_id)),
+        "target":              value_lookup.get(str(rel.target_entity_id)),
+        "source_entity_id":    str(rel.source_entity_id),
+        "target_entity_id":    str(rel.target_entity_id),
+        "relationship_type":   rel.relationship_type,
+        "direction":           rel.direction,
+        "epistemic_status":    rel.epistemic_status,
+        "verification_status": rel.verification_status,
+        "is_canonical":        bool(rel.is_canonical),
+        "confidence":          rel.confidence,
+        "amount":              rel.amount,
+        "event_timestamp":     rel.event_timestamp.isoformat() if rel.event_timestamp else None,
+        "first_seen":          rel.first_seen.isoformat() if rel.first_seen else None,
+        "last_seen":           rel.last_seen.isoformat() if rel.last_seen else None,
+        "observation_count":   rel.observation_count,
+        "attributes":          rel.attributes or {},
+        "evidence_refs":       rel.evidence_refs or [],
+        "event_refs":          rel.event_refs or [],
+        "source_engine":       rel.source_engine,
+        "engine_version":      rel.engine_version,
+        "component_scores":    rel.component_scores or {},
+        "reason_codes":        rel.reason_codes or [],
+        "reviewed_by":         str(rel.reviewed_by) if rel.reviewed_by else None,
+        "reviewed_at":         rel.reviewed_at.isoformat() if rel.reviewed_at else None,
     }
 
 @router.get("/{case_id}")
@@ -223,29 +235,44 @@ async def get_graph(
         if not a_val or not b_val or a_val == b_val:
             continue
         provenance = {
-            "relationship_type": rel.relationship_type,
-            "epistemic_status": rel.epistemic_status,
-            "direction": rel.direction,
-            "confidence": rel.confidence,
-            "amount": rel.amount,
-            "evidence_refs": rel.evidence_refs or [],
-            "event_refs": rel.event_refs or [],
-            "observation_count": rel.observation_count,
+            "relationship_type":   rel.relationship_type,
+            "epistemic_status":    rel.epistemic_status,
+            "verification_status": rel.verification_status,
+            "is_canonical":        bool(rel.is_canonical),
+            "direction":           rel.direction,
+            "confidence":          rel.confidence,
+            "amount":              rel.amount,
+            "evidence_refs":       rel.evidence_refs or [],
+            "event_refs":          rel.event_refs or [],
+            "observation_count":   rel.observation_count,
         }
-        if G.has_edge(a_val, b_val):
-            # Drawn edges prefer observed provenance; inferred links are surfaced
-            # separately as dashed hidden_edges below.
-            if rel.epistemic_status == RT.OBSERVED or G[a_val][b_val].get("relationship_type") is None:
-                G[a_val][b_val].update(provenance)
-        else:
-            G.add_edge(
-                a_val, b_val,
-                edge_type=rel.relationship_type,
-                weight=rel.observation_count or 1,
-                timestamps=[],
-                **provenance,
-            )
         relationship_edges.append(_relationship_to_dict(rel, entity_values))
+
+        if rel.verification_status == RT.REVIEW_REJECTED:
+            # Explicitly rejected by investigator: purge from canonical graph topology if present
+            if G.has_edge(a_val, b_val):
+                G.remove_edge(a_val, b_val)
+            continue
+
+        if rel.is_canonical:
+            # Canonical edge: add or update in G
+            if G.has_edge(a_val, b_val):
+                G[a_val][b_val].update(provenance)
+            else:
+                G.add_edge(
+                    a_val, b_val,
+                    edge_type=rel.relationship_type,
+                    weight=rel.observation_count or 1,
+                    timestamps=[],
+                    **provenance,
+                )
+
+    # Recompute degree centrality strictly on canonical graph topology
+    import networkx as _nx
+    _deg_centrality = _nx.degree_centrality(G)
+    for _node, _val in _deg_centrality.items():
+        if G.has_node(_node):
+            G.nodes[_node]["degree_centrality"] = _val
 
     EXCLUDED_HIDDEN_LINK_TYPES = {"AMOUNT", "KEYWORD"}
     hidden_edges = []
@@ -324,9 +351,11 @@ async def get_graph(
         if r["source"] in visible_nodes and r["target"] in visible_nodes
     ]
     graph_data["relationships"] = {
-        "observed": [r for r in visible_relationships if r["epistemic_status"] == RT.OBSERVED],
-        "inferred": [r for r in visible_relationships if r["epistemic_status"] == RT.INFERRED],
-        "total":    len(visible_relationships),
+        "observed":           [r for r in visible_relationships if r["epistemic_status"] == RT.OBSERVED],
+        "inferred":           [r for r in visible_relationships if r["epistemic_status"] == RT.INFERRED],
+        "investigator_added": [r for r in visible_relationships if r["epistemic_status"] == RT.INVESTIGATOR_ADDED],
+        "canonical":          [r for r in visible_relationships if r.get("is_canonical") is True],
+        "total":              len(visible_relationships),
     }
     graph_data["case_id"]      = case_id
     graph_data["selection"] = {
@@ -499,15 +528,17 @@ relationships_router = APIRouter()
 @relationships_router.get("/{case_id}")
 async def list_relationships(
     case_id:           str,
-    epistemic_status:  str | None = Query(None, pattern="^(OBSERVED|INFERRED)$"),
+    epistemic_status:  str | None = Query(None, pattern="^(OBSERVED|INFERRED|INVESTIGATOR_ADDED)$"),
     relationship_type: str | None = Query(None),
+    is_canonical:      bool | None = Query(None),
     limit:             int = Query(200, ge=1, le=1000),
     db:                AsyncSession = Depends(get_db),
     current:           User = Depends(get_current_user),
 ):
     """
     List persisted case-graph relationships — the same edges the graph renders —
-    each with semantic type, epistemic status and evidence/event provenance.
+    each with semantic type, epistemic status, verification status, canonical status,
+    and evidence/event provenance.
     """
     c = await require_case_access(db, current, case_id)
 
@@ -516,6 +547,13 @@ async def list_relationships(
         q = q.where(Relationship.epistemic_status == epistemic_status)
     if relationship_type:
         q = q.where(Relationship.relationship_type == relationship_type)
+    if is_canonical is not None:
+        # `Relationship.is_canonical` is a derived Python @property, not a column, so it
+        # cannot be used inside a WHERE clause — doing so silently compiles to
+        # `WHERE false` (and `is_canonical=false` would match every row). Filter with the
+        # SQL mirror of the canonical eligibility rule instead.
+        canonical_clause = canonical_sql_predicate()
+        q = q.where(canonical_clause if is_canonical else ~canonical_clause)
     q = q.order_by(Relationship.created_at.desc()).limit(limit)
     rows = (await db.execute(q)).scalars().all()
 
@@ -543,10 +581,158 @@ async def list_relationships(
 
     observed = [r for r in rows if r.epistemic_status == RT.OBSERVED]
     inferred = [r for r in rows if r.epistemic_status == RT.INFERRED]
+    investigator_added = [r for r in rows if r.epistemic_status == RT.INVESTIGATOR_ADDED]
+    canonical = [r for r in rows if r.is_canonical]
     return {
-        "case_id":        case_id,
-        "count":          len(rows),
-        "observed_count": len(observed),
-        "inferred_count": len(inferred),
-        "relationships":  [_detail(r) for r in rows],
+        "case_id":                  case_id,
+        "count":                    len(rows),
+        "observed_count":           len(observed),
+        "inferred_count":           len(inferred),
+        "investigator_added_count": len(investigator_added),
+        "canonical_count":          len(canonical),
+        "relationships":            [_detail(r) for r in rows],
     }
+
+
+# ── Relationship review queue (V5 Phase 3) ────────────────────────────────────
+#
+# The queue is the human adjudication surface for analytical (INFERRED) edges.
+# Reading it is side-effect free; deciding on it is NOT done here — the decision is
+# translated into a typed command and dispatched through the Investigation Brain so
+# authorization, validation, hash-chained audit logging, state-version bumping and
+# dependent-finding freshness invalidation all happen on the one sanctioned path.
+
+class RelationshipReviewPayload(BaseModel):
+    verdict: str                      # "accept" | "reject"
+    reason: str | None = None
+    base_case_version: int | None = None
+
+
+_REVIEW_ACCEPT_VERDICTS = frozenset({"accept", "accepted", "confirm", "confirmed"})
+_REVIEW_REJECT_VERDICTS = frozenset({"reject", "rejected", "dispute", "disputed"})
+
+
+@relationships_router.get("/{case_id}/review-queue")
+async def relationship_review_queue(
+    case_id:        str,
+    review_status:  str = Query(
+        RT.REVIEW_UNREVIEWED,
+        pattern="^(UNREVIEWED|ACCEPTED|REJECTED|ALL)$",
+        description="Review status to return (default: the pending UNREVIEWED queue)",
+    ),
+    limit:          int = Query(200, ge=1, le=1000),
+    db:             AsyncSession = Depends(get_db),
+    current:        User = Depends(get_current_user),
+):
+    """
+    List relationships awaiting investigator adjudication, with full provenance
+    (evidence_refs, event_refs, confidence, source engine, reason codes) so an edge can
+    be judged on the record rather than on how it was drawn.
+
+    ``pending_count`` is the INFERRED + UNREVIEWED backlog: those are the edges that can
+    never enter the canonical topology until a human accepts them.
+    """
+    c = await require_case_access(db, current, case_id)
+
+    q = select(Relationship).where(Relationship.case_id == c.id)
+    if review_status != "ALL":
+        q = q.where(Relationship.verification_status == review_status)
+    q = q.order_by(Relationship.created_at.asc()).limit(limit)
+    rows = (await db.execute(q)).scalars().all()
+
+    entity_ids: set = set()
+    for rel in rows:
+        entity_ids.add(rel.source_entity_id)
+        entity_ids.add(rel.target_entity_id)
+
+    entities_map: dict[str, Entity] = {}
+    if entity_ids:
+        found = (await db.execute(
+            select(Entity).where(Entity.id.in_(list(entity_ids)))
+        )).scalars().all()
+        entities_map = {str(e.id): e for e in found}
+
+    value_lookup = {eid: e.canonical_value for eid, e in entities_map.items()}
+
+    queue: list[dict] = []
+    for rel in rows:
+        detail = _relationship_to_dict(rel, value_lookup)
+        source = entities_map.get(str(rel.source_entity_id))
+        target = entities_map.get(str(rel.target_entity_id))
+        detail["source_type"] = source.entity_type if source else "UNKNOWN"
+        detail["target_type"] = target.entity_type if target else "UNKNOWN"
+        detail["review_required"] = rel.verification_status == RT.REVIEW_UNREVIEWED
+        detail["canonical_eligible"] = RT.is_canonical_eligible(
+            rel.epistemic_status, rel.verification_status
+        )
+        queue.append(detail)
+
+    pending = [
+        item for item in queue
+        if item["review_required"] and item["epistemic_status"] == RT.INFERRED
+    ]
+
+    return {
+        "case_id":            case_id,
+        "case_state_version": c.state_version or 1,
+        "review_status":      review_status,
+        "count":              len(queue),
+        "pending_count":      len(pending),
+        "capabilities": {
+            "can_confirm": user_has_capability(current.role, CAP_RELATIONSHIP_CONFIRM),
+            "can_reject":  user_has_capability(current.role, CAP_RELATIONSHIP_REJECT),
+        },
+        "review_queue": queue,
+    }
+
+
+@relationships_router.post(
+    "/{case_id}/{relationship_id}/review", response_model=CommandResult
+)
+async def review_relationship(
+    case_id:         str,
+    relationship_id: str,
+    payload:         RelationshipReviewPayload,
+    db:              AsyncSession = Depends(get_db),
+    current:         User = Depends(get_current_user),
+):
+    """
+    Record an investigator verdict on a relationship.
+
+    Performs NO direct database mutation: the verdict is mapped onto
+    CONFIRM_RELATIONSHIP / REJECT_RELATIONSHIP and dispatched through the Investigation
+    Brain, which enforces capability authorization (403), case-scoped existence (404),
+    audit logging, activity recording and a case state-version bump.
+    """
+    c = await require_case_access(db, current, case_id, write=True)
+
+    verdict = (payload.verdict or "").strip().lower()
+    if verdict in _REVIEW_ACCEPT_VERDICTS:
+        command = "CONFIRM_RELATIONSHIP"
+    elif verdict in _REVIEW_REJECT_VERDICTS:
+        command = "REJECT_RELATIONSHIP"
+    else:
+        raise HTTPException(400, "verdict must be 'accept' or 'reject'")
+
+    # Coerce before dispatch so a malformed id is a clean 404, never a ValueError 500.
+    try:
+        rel_uuid = uuid.UUID(str(relationship_id))
+    except (TypeError, ValueError):
+        raise HTTPException(404, "Relationship not found in this case")
+
+    rel = await db.get(Relationship, rel_uuid)
+    if not rel or rel.case_id != c.id:
+        raise HTTPException(404, "Relationship not found in this case")
+
+    return await dispatch_command(
+        db,
+        c.id,
+        CommandRequest(
+            command=command,
+            payload={"relationship_id": str(rel.id)},
+            reason=payload.reason or f"Relationship review verdict: {verdict}",
+            base_case_version=payload.base_case_version,
+        ),
+        current,
+    )
+

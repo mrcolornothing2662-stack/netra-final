@@ -218,6 +218,32 @@ async def copilot_endpoint(
     generation_ms = round((t_generation - t_context) * 1000.0, 2)
     verification_ms = round((t_verify - t_generation) * 1000.0, 2)
     total_ms = round((t_verify - t_start) * 1000.0, 2)
+    # Construct command mutation proposals targeting the Command Gateway for one-click approval
+    mutation_proposals: list[dict] = []
+    for edge in edges:
+        if edge.epistemic_status.upper() == "INFERRED":
+            mutation_proposals.append({
+                "command": "CONFIRM_RELATIONSHIP",
+                "endpoint": f"/cases/{clean_case_id}/commands",
+                "payload": {
+                    "source": edge.source_canonical,
+                    "target": edge.target_canonical,
+                    "relationship_type": edge.relationship_type,
+                },
+                "description": f"Confirm inferred relationship: {edge.source_canonical} -> {edge.relationship_type} -> {edge.target_canonical}",
+                "capability_required": "CAP_RELATIONSHIP_CONFIRM",
+            })
+    if any(k in body.question.lower() for k in ("hypothesis", "theory", "possibility", "scenario")):
+        mutation_proposals.append({
+            "command": "CREATE_HYPOTHESIS",
+            "endpoint": f"/cases/{clean_case_id}/commands",
+            "payload": {
+                "title": f"Investigative lead: {body.question[:80]}",
+                "description": (verified.text or "")[:400],
+            },
+            "description": "Create formal hypothesis tracking this investigative lead",
+            "capability_required": "CAP_HYPOTHESIS_WRITE",
+        })
 
     return {
         "answer": verified.text,
@@ -225,6 +251,7 @@ async def copilot_endpoint(
         "citations": citations_out,
         "observed_facts": observed_facts,
         "inferred_facts": inferred_facts,
+        "mutation_proposals": mutation_proposals,
         "model_used": gen_resp.model,
         "provider": gen_resp.provider,
         "is_generated": True,

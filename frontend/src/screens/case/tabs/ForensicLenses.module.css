@@ -1,0 +1,486 @@
+/* ForensicLenses.module.css — NETRA V5 Forensic Lens Visual Engine */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+}
+
+/* Header & Lens Switcher */
+.headerBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.titleArea {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.subtitle {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  max-width: 720px;
+  line-height: 1.4;
+}
+
+.lensSwitcher {
+  display: inline-flex;
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  gap: 3px;
+}
+
+.lensTabBtn {
+  padding: 8px 18px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-family: var(--type-mono, monospace);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lensTabBtn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.lensTabMoneyActive {
+  color: #F59E0B;
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.35);
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.15);
+}
+
+.lensTabCommsActive {
+  color: #06B6D4;
+  background: rgba(6, 182, 212, 0.12);
+  border-color: rgba(6, 182, 212, 0.35);
+  box-shadow: 0 0 12px rgba(6, 182, 212, 0.15);
+}
+
+.lensTabGeoActive {
+  color: #10B981;
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.35);
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.15);
+}
+
+/* Disclaimer Banner */
+.disclaimerBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: rgba(244, 63, 94, 0.08);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  border-radius: var(--radius-md);
+  color: #FDA4AF;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.disclaimerTitle {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-family: var(--type-mono, monospace);
+  display: block;
+  margin-bottom: 2px;
+}
+
+/* Cross-Lens Coincidences Box */
+.crossLensBanner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: rgba(139, 92, 246, 0.09);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  border-radius: var(--radius-md);
+}
+
+.crossLensHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #C4B5FD;
+}
+
+.crossLensItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: rgba(20, 15, 35, 0.5);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  color: var(--text-primary);
+}
+
+/* Filter Bar */
+.filterBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  flex-wrap: wrap;
+}
+
+.filterItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.filterSelect, .filterInput {
+  background: var(--surface-2, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--line);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  font-family: var(--type-mono, monospace);
+  outline: none;
+}
+
+.filterSelect:focus, .filterInput:focus {
+  border-color: #00F0FF;
+}
+
+/* Stat Grid */
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+
+.statCard {
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.statLabel {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted, #71717A);
+  font-family: var(--type-mono, monospace);
+}
+
+.statValue {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: var(--type-mono, monospace);
+}
+
+.statSub {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+/* Main Content Area */
+.lensContent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Signal / Alert Badges */
+.signalList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.signalCard {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-1);
+  border-radius: var(--radius-md);
+  border-left: 3px solid;
+}
+
+.signalCritical {
+  border-left-color: #EF4444;
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.signalHigh {
+  border-left-color: #F59E0B;
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.signalInfo {
+  border-left-color: #00F0FF;
+  background: rgba(0, 240, 255, 0.05);
+}
+
+.signalBody {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.signalTitle {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.signalDesc {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+/* Ledger / Event Table */
+.tableContainer {
+  overflow-x: auto;
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.lensTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  text-align: left;
+}
+
+.lensTable th {
+  background: rgba(255, 255, 255, 0.02);
+  padding: 10px 14px;
+  color: var(--text-muted, #A1A1AA);
+  font-family: var(--type-mono, monospace);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--line);
+}
+
+.lensTable td {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+.lensTable tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Provenance Badge */
+.provBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: rgba(0, 240, 255, 0.08);
+  border: 1px solid rgba(0, 240, 255, 0.25);
+  border-radius: var(--radius-sm);
+  color: #00F0FF;
+  font-family: var(--type-mono, monospace);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.provBadge:hover {
+  background: rgba(0, 240, 255, 0.16);
+  border-color: #00F0FF;
+}
+
+/* Flow Graph Cards (Money Trail) */
+.flowCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--space-3);
+}
+
+.flowCard {
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.flowHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.flowAmount {
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-family: var(--type-mono, monospace);
+  color: #F59E0B;
+}
+
+.flowPath {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.flowArrow {
+  color: #F59E0B;
+  font-weight: bold;
+}
+
+/* Heatmap Grid (Communications) */
+.heatmapContainer {
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+}
+
+.heatmapTitle {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+  display: flex;
+  justify-content: space-between;
+}
+
+.heatmapGrid {
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  gap: 3px;
+  align-items: flex-end;
+  height: 80px;
+  padding-top: var(--space-2);
+}
+
+.heatmapBarCol {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  justify-content: flex-end;
+}
+
+.heatmapBar {
+  width: 100%;
+  background: rgba(6, 182, 212, 0.4);
+  border-radius: 2px 2px 0 0;
+  transition: height 0.2s ease, background 0.2s ease;
+  min-height: 4px;
+}
+
+.heatmapBar:hover {
+  background: #06B6D4;
+}
+
+.heatmapHourLabel {
+  font-size: 0.6rem;
+  font-family: var(--type-mono, monospace);
+  color: var(--text-muted, #71717A);
+  margin-top: 4px;
+}
+
+/* Tower Hop Cards (Geographic) */
+.hopTimeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.hopItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.hopSeq {
+  font-size: 0.85rem;
+  font-weight: 700;
+  font-family: var(--type-mono, monospace);
+  color: #10B981;
+  width: 28px;
+}
+
+.hopDetails {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.hopTower {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+}
+
+.hopMeta {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  font-family: var(--type-mono, monospace);
+}
+
+.hopDelta {
+  font-size: 0.75rem;
+  font-family: var(--type-mono, monospace);
+  color: #34D399;
+  background: rgba(16, 185, 129, 0.1);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+}

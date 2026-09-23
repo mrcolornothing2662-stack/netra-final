@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Iterable, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -405,6 +405,33 @@ def _merge_unique(existing: Any, incoming: Sequence[str]) -> list[str]:
     return list(dict.fromkeys(base + [str(x) for x in incoming]))
 
 
+def canonical_sql_predicate():
+    """
+    SQL expression equivalent of ``RT.is_canonical_eligible``.
+
+    ``Relationship.is_canonical`` is a read-only Python ``@property`` derived from
+    (epistemic_status, verification_status) — it is deliberately NOT a column and its
+    setter is a no-op. Using it inside ``select().where(...)`` therefore does not
+    raise: the property object is compared to a bool and the query silently compiles
+    to ``WHERE false`` (or ``WHERE true``), returning wrong rows.
+
+    Any query that filters on canonical topology MUST use this predicate so the SQL
+    rule and the Python rule cannot drift apart.
+    """
+    from db.models import Relationship
+
+    return and_(
+        Relationship.verification_status != RT.REVIEW_REJECTED,
+        or_(
+            Relationship.epistemic_status.in_((RT.OBSERVED, RT.INVESTIGATOR_ADDED)),
+            and_(
+                Relationship.epistemic_status == RT.INFERRED,
+                Relationship.verification_status == RT.REVIEW_ACCEPTED,
+            ),
+        ),
+    )
+
+
 async def upsert_relationship(
     db: AsyncSession,
     *,
@@ -450,6 +477,8 @@ async def upsert_relationship(
     existing = (await _find()).scalars().first()
 
     if existing is None:
+        verification_status = RT.REVIEW_UNREVIEWED
+        is_canonical = RT.is_canonical_eligible(epistemic_status, verification_status)
         row = Relationship(
             case_id=case_id,
             source_entity_id=source_entity_id,
@@ -457,6 +486,8 @@ async def upsert_relationship(
             relationship_type=relationship_type,
             direction=direction,
             epistemic_status=epistemic_status,
+            verification_status=verification_status,
+            is_canonical=is_canonical,
             confidence=confidence,
             amount=amount,
             event_timestamp=timestamp,
@@ -614,6 +645,8 @@ async def materialize_observed_relationships(
                 relationship_type=draft.relationship_type,
                 direction=draft.direction,
                 epistemic_status=draft.epistemic_status,
+                verification_status=RT.REVIEW_UNREVIEWED,
+                is_canonical=RT.is_canonical_eligible(draft.epistemic_status, RT.REVIEW_UNREVIEWED),
                 confidence=draft.confidence,
                 amount=draft.amount,
                 event_timestamp=draft.timestamp,

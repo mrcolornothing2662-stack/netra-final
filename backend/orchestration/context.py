@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Case, Entity, EvidenceEvent, EvidenceFile, Relationship
+from db.models import Case, Entity, EvidenceEvent, EvidenceFile, IdentityCandidate, InvestigationFinding, Relationship
 from orchestration.contracts import CaseContext
 from orchestration.finding_service import serialize_finding
 from orchestration.intelligence_state import compute_state
@@ -44,7 +44,10 @@ async def load_case_context(db: AsyncSession, case_id) -> CaseContext:
         select(Relationship).where(Relationship.case_id == cid)
     )).scalars().all()
 
-    from db.models import InvestigationFinding
+    candidates = (await db.execute(
+        select(IdentityCandidate).where(IdentityCandidate.case_id == cid)
+    )).scalars().all()
+
     findings = (await db.execute(
         select(InvestigationFinding).where(InvestigationFinding.case_id == cid)
     )).scalars().all()
@@ -108,19 +111,30 @@ async def load_case_context(db: AsyncSession, case_id) -> CaseContext:
             "target_value":      target.canonical_value if target else None,
             "source_type":       source.entity_type if source else None,
             "target_type":       target.entity_type if target else None,
-            "relationship_type": rel.relationship_type,
-            "direction":         rel.direction,
-            "epistemic_status":  rel.epistemic_status,
-            "confidence":        rel.confidence,
-            "amount":            rel.amount,
-            "evidence_refs":     rel.evidence_refs or [],
-            "event_refs":        rel.event_refs or [],
-            "component_scores":  rel.component_scores or {},
-            "reason_codes":      rel.reason_codes or [],
-            "source_engine":     rel.source_engine,
-            "engine_version":    rel.engine_version,
-            "observation_count": rel.observation_count,
+            "relationship_type":   rel.relationship_type,
+            "direction":           rel.direction,
+            "epistemic_status":    rel.epistemic_status,
+            "verification_status": rel.verification_status,
+            "is_canonical":        bool(rel.is_canonical),
+            "confidence":          rel.confidence,
+            "amount":              rel.amount,
+            "evidence_refs":       rel.evidence_refs or [],
+            "event_refs":          rel.event_refs or [],
+            "component_scores":    rel.component_scores or {},
+            "reason_codes":        rel.reason_codes or [],
+            "source_engine":       rel.source_engine,
+            "engine_version":      rel.engine_version,
+            "observation_count":   rel.observation_count,
         })
+
+    candidate_payload = [{
+        "id":                  str(c.id),
+        "canonical_entity_id": str(c.canonical_entity_id) if c.canonical_entity_id else None,
+        "candidate_value":     c.candidate_value,
+        "candidate_type":      c.candidate_type,
+        "resolution_status":   c.resolution_status,
+        "source_refs":         c.source_refs or [],
+    } for c in candidates]
 
     counts = await compute_state(db, cid)
 
@@ -129,11 +143,13 @@ async def load_case_context(db: AsyncSession, case_id) -> CaseContext:
         case_number=case.case_number,
         case_fir_number=case.fir_number,
         case_created_at=_iso(case.created_at),
+        case_state_version=case.state_version or 1,
         evidence_files=evidence_payload,
         evidence_types=evidence_types,
         events=event_payload,
         entities=entity_payload,
         relationships=relationship_payload,
+        identity_candidates=candidate_payload,
         findings=[serialize_finding(f) for f in findings],
         counts=counts,
     )

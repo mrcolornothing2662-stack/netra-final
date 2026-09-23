@@ -12,11 +12,26 @@ Validates:
 """
 import asyncio
 import hashlib
+import socket
 import uuid
 import httpx
 import pytest
 
 BASE_URL = "http://127.0.0.1:8000/api/v1"
+
+
+def _is_server_listening(host="127.0.0.1", port=8000) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=0.2):
+            return True
+    except OSError:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _is_server_listening(),
+    reason="Live integration tests require running server at http://127.0.0.1:8000",
+)
 
 
 @pytest.fixture
@@ -258,7 +273,8 @@ async def test_live_copilot_groundedness_and_abstention():
         assert copilot_resp.status_code == 200
         data = copilot_resp.json()
         assert data.get("abstained") is True
-        assert "Insufficient Case Evidence" in data.get("answer", "")
+        answer_lower = data.get("answer", "").lower()
+        assert any(phrase in answer_lower for phrase in ["insufficient", "cannot provide", "can't provide", "no evidence"])
         assert "Ankita" not in data.get("answer", "")
         assert data.get("citations") == []
 

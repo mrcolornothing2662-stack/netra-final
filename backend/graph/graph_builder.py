@@ -300,16 +300,18 @@ def graph_to_json(G: nx.Graph) -> dict:
             "edge_type": attrs.get("edge_type", "co_occurrence"),
             "weight":    attrs.get("weight", 1),
             # Semantic + epistemic provenance (present when the edge is backed by
-            # a persisted observed/inferred Relationship).
-            "relationship_type":  attrs.get("relationship_type"),
-            "epistemic_status":   attrs.get("epistemic_status", "OBSERVED"),
-            "direction":          attrs.get("direction"),
-            "confidence":         attrs.get("confidence"),
-            "amount":             attrs.get("amount"),
-            "evidence_refs":      evidence_refs,
-            "event_refs":         attrs.get("event_refs") or [],
-            "observation_count":  attrs.get("observation_count"),
-            "has_provenance":     bool(evidence_refs),
+            # a persisted observed/inferred/investigator relationship).
+            "relationship_type":   attrs.get("relationship_type"),
+            "epistemic_status":    attrs.get("epistemic_status", "OBSERVED"),
+            "verification_status": attrs.get("verification_status", "UNREVIEWED"),
+            "is_canonical":        bool(attrs.get("is_canonical", False)),
+            "direction":           attrs.get("direction"),
+            "confidence":          attrs.get("confidence"),
+            "amount":              attrs.get("amount"),
+            "evidence_refs":       evidence_refs,
+            "event_refs":          attrs.get("event_refs") or [],
+            "observation_count":   attrs.get("observation_count"),
+            "has_provenance":      bool(evidence_refs),
         })
 
     return {"nodes": nodes, "edges": edges}

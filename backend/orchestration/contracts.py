@@ -59,6 +59,75 @@ STATUSES = (STATUS_OPEN, STATUS_CONFIRMED, STATUS_DISMISSED, STATUS_SUPERSEDED)
 # Human-review states that automated re-analysis must never clobber.
 HUMAN_REVIEW_STATUSES = frozenset({STATUS_CONFIRMED, STATUS_DISMISSED})
 
+# Freshness lifecycle states for findings
+FRESHNESS_CURRENT      = "CURRENT"
+FRESHNESS_NEEDS_REVIEW = "NEEDS_REVIEW"
+FRESHNESS_STALE        = "STALE"
+FRESHNESS_RECOMPUTING  = "RECOMPUTING"
+FRESHNESS_SUPERSEDED   = "SUPERSEDED"
+FRESHNESS_INVALIDATED  = "INVALIDATED"
+
+FRESHNESS_STATUSES = frozenset({
+    FRESHNESS_CURRENT,
+    FRESHNESS_NEEDS_REVIEW,
+    FRESHNESS_STALE,
+    FRESHNESS_RECOMPUTING,
+    FRESHNESS_SUPERSEDED,
+    FRESHNESS_INVALIDATED,
+})
+
+
+# ── NormalizedEvent ──────────────────────────────────────────────────────────
+
+@dataclass
+class NormalizedEvent:
+    """
+    Canonical evidence event contract produced by all parsers.
+    Acts as the standard schema before downstream entity extraction and persistence.
+    """
+    event_id: str
+    event_type: str
+    timestamp: str | None
+    timestamp_precision: str = "EXACT"  # EXACT, MINUTE, HOUR, DATE_ONLY, RANGE, UNKNOWN
+    text: str = ""
+    source_doc: str = ""
+    evidence_id: str | None = None
+    source_line: int | None = None
+    source_page: int | None = None
+    actors: list[str] = field(default_factory=list)
+    objects: list[str] = field(default_factory=list)
+    location: str | None = None
+    amount: float | None = None
+    currency: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    extraction_method: str = "deterministic"
+    confidence: float = 1.0
+
+    @classmethod
+    def from_dict(cls, data: dict, event_id: str | None = None, evidence_id: str | None = None) -> NormalizedEvent:
+        meta = dict(data.get("metadata") or {})
+        return cls(
+            event_id=event_id or str(data.get("event_id") or data.get("id") or ""),
+            event_type=str(data.get("event_type") or "unknown"),
+            timestamp=data.get("timestamp"),
+            text=str(data.get("text") or data.get("text_content") or ""),
+            source_doc=str(data.get("source_doc") or meta.get("source_doc") or ""),
+            evidence_id=evidence_id or data.get("evidence_id") or data.get("evidence_file_id"),
+            source_line=data.get("source_line"),
+            source_page=data.get("source_page"),
+            actors=list(data.get("actors") or meta.get("actors") or []),
+            objects=list(data.get("objects") or meta.get("objects") or []),
+            location=data.get("location") or meta.get("location"),
+            amount=data.get("amount") or meta.get("amount"),
+            currency=data.get("currency") or meta.get("currency") or "INR",
+            metadata=meta,
+            extraction_method=str(data.get("extraction_method") or "deterministic"),
+            confidence=float(data.get("confidence", 1.0)),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
 
 # ── CognitiveResult ───────────────────────────────────────────────────────────
 
@@ -78,14 +147,22 @@ class CognitiveResult:
     status: str = STATUS_OPEN
     source_engine: str = ""
     engine_version: str = ""
+    provenance: str = "INFERRED"
+    epistemic_status: str = "INFERRED"
     entity_refs: list[str] = field(default_factory=list)
     event_refs: list[str] = field(default_factory=list)
     evidence_refs: list[str] = field(default_factory=list)
+    supporting_refs: list[str] = field(default_factory=list)
+    contradicting_refs: list[str] = field(default_factory=list)
+    missing_information: list[str] = field(default_factory=list)
+    suggested_actions: list[str] = field(default_factory=list)
     component_scores: dict[str, Any] = field(default_factory=dict)
     reason_codes: list[str] = field(default_factory=list)
     reasoning: str = ""
     citations: list[dict[str, Any]] = field(default_factory=list)
     observed_at: datetime | None = None
+    generated_at_case_version: int | None = None
+    freshness_status: str = FRESHNESS_CURRENT
     # Optional stable identity override; otherwise derived from type/engine/refs.
     dedup_key: str | None = None
 
@@ -98,6 +175,8 @@ class CognitiveResult:
             raise ValueError(f"invalid status: {self.status!r}")
         if self.confidence is not None:
             self.confidence = max(0.0, min(1.0, float(self.confidence)))
+        if self.freshness_status not in FRESHNESS_STATUSES:
+            raise ValueError(f"invalid freshness_status: {self.freshness_status!r}")
 
     def fingerprint(self) -> str:
         """Stable identity so repeated analysis updates instead of duplicating."""
@@ -132,12 +211,17 @@ class CaseContext:
     case_number: str = ""
     case_fir_number: str | None = None
     case_created_at: str | None = None
+    case_state_version: int = 1
     evidence_files: list[dict[str, Any]] = field(default_factory=list)
     evidence_types: set[str] = field(default_factory=set)
     events: list[dict[str, Any]] = field(default_factory=list)
     entities: list[dict[str, Any]] = field(default_factory=list)
     relationships: list[dict[str, Any]] = field(default_factory=list)
     findings: list[dict[str, Any]] = field(default_factory=list)
+    identity_candidates: list[dict[str, Any]] = field(default_factory=list)
+    hypotheses: list[dict[str, Any]] = field(default_factory=list)
+    actions: list[dict[str, Any]] = field(default_factory=list)
+    information_gaps: list[dict[str, Any]] = field(default_factory=list)
     counts: dict[str, int] = field(default_factory=dict)
     # Populated by the orchestrator only when authorised cross-case analysis is
     # enabled; the cross-case engine never reaches across case boundaries itself.

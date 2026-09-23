@@ -16,8 +16,18 @@ import it without creating cycles.
 
 OBSERVED = "OBSERVED"   # directly present in evidence (bank row, CDR record, chat)
 INFERRED = "INFERRED"   # produced by a cognitive engine (hidden link, etc.)
+INVESTIGATOR_ADDED = "INVESTIGATOR_ADDED"  # introduced explicitly by investigator
 
-EPISTEMIC_STATUSES = frozenset({OBSERVED, INFERRED})
+EPISTEMIC_STATUSES = frozenset({OBSERVED, INFERRED, INVESTIGATOR_ADDED})
+
+
+# ── Review status ────────────────────────────────────────────────────────────
+
+REVIEW_UNREVIEWED = "UNREVIEWED"
+REVIEW_ACCEPTED   = "ACCEPTED"
+REVIEW_REJECTED   = "REJECTED"
+
+REVIEW_STATUSES = frozenset({REVIEW_UNREVIEWED, REVIEW_ACCEPTED, REVIEW_REJECTED})
 
 
 # ── Direction ─────────────────────────────────────────────────────────────────
@@ -46,8 +56,15 @@ MENTIONED_IN = "MENTIONED_IN"
 PARTICIPATED_IN = "PARTICIPATED_IN"
 CONNECTED_TO = "CONNECTED_TO"
 CO_OCCURRENCE = "CO_OCCURRENCE"
+SHARED_DEVICE = "SHARED_DEVICE"
+TRAVELLED_WITH = "TRAVELLED_WITH"
+REGISTERED_TO = "REGISTERED_TO"
+SAME_AS = "SAME_AS"
+COMMUNICATED_WITH = "COMMUNICATED_WITH"
 
 RELATIONSHIP_TYPES = frozenset({
+    SAME_AS,
+    REGISTERED_TO,
     OWNS,
     USES,
     CALLED,
@@ -61,6 +78,10 @@ RELATIONSHIP_TYPES = frozenset({
     PARTICIPATED_IN,
     CONNECTED_TO,
     CO_OCCURRENCE,
+    SHARED_DEVICE,
+    TRAVELLED_WITH,
+    REGISTERED_TO,
+    COMMUNICATED_WITH,
 })
 
 
@@ -90,5 +111,29 @@ def is_valid_epistemic_status(value: str | None) -> bool:
     return value in EPISTEMIC_STATUSES
 
 
+def is_valid_review_status(value: str | None) -> bool:
+    return value in REVIEW_STATUSES
+
+
 def is_valid_direction(value: str | None) -> bool:
     return value in DIRECTIONS
+
+
+def is_canonical_eligible(epistemic_status: str | None, review_status: str | None = REVIEW_UNREVIEWED) -> bool:
+    """
+    Determine whether an edge is eligible to form the canonical graph topology.
+    Canonical rules:
+      - OBSERVED + UNREVIEWED or ACCEPTED (rejected edges excluded)
+      - INVESTIGATOR_ADDED + ACCEPTED (or UNREVIEWED pending explicit confirmation)
+      - INFERRED edges ONLY if explicitly ACCEPTED by an investigator
+    """
+    if review_status == REVIEW_REJECTED:
+        return False
+    if epistemic_status == OBSERVED:
+        return True
+    if epistemic_status == INVESTIGATOR_ADDED:
+        return True
+    if epistemic_status == INFERRED and review_status == REVIEW_ACCEPTED:
+        return True
+    return False
+

@@ -53,6 +53,7 @@ async def require_case_access(
     *,
     write: bool = False,
     required_roles: Optional[Set[str]] = None,
+    required_capability: Optional[str] = None,
 ) -> Case:
     """
     Enforce per-case access control:
@@ -60,7 +61,8 @@ async def require_case_access(
     2. Case Collaborators (explicitly registered in case_collaborators table)
     3. Admins do NOT have universal case read/write access unless explicitly assigned.
     4. Observers have read-only access.
-    5. Every authorization decision (ALLOW or DENY) is logged in the tamper-evident audit chain.
+    5. Checks granular capabilities if required_capability is specified.
+    6. Every authorization decision (ALLOW or DENY) is logged in the tamper-evident audit chain.
     """
     case = None
     try:
@@ -116,6 +118,24 @@ async def require_case_access(
 
     effective_role = "lead_io" if is_assigned else (collaborator_role or "observer")
 
+    if required_capability:
+        from investigation.policies import user_has_capability
+        can_do = user_has_capability(effective_role, required_capability) or user_has_capability(current.role, required_capability)
+        if not can_do:
+            await log_case_authorization(
+                "CASE_ACCESS_DENIED",
+                str(case.id),
+                current,
+                {
+                    "reason": "insufficient_capability",
+                    "effective_role": effective_role,
+                    "user_role": current.role,
+                    "required_capability": required_capability,
+                    "write_requested": write,
+                },
+            )
+            raise HTTPException(403, f"Insufficient permissions: capability '{required_capability}' required")
+
     if write:
         if effective_role == "observer":
             await log_case_authorization(
@@ -143,6 +163,7 @@ async def require_case_access(
                 },
             )
             raise HTTPException(403, "Insufficient permissions for requested action")
+
 
     # Access permitted — record in audit ledger for mutating operations (write=True)
     if write:

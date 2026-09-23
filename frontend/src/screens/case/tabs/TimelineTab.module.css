@@ -1,0 +1,428 @@
+/* TimelineTab & Replay Styles */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+}
+
+.headerBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.titleArea {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.subtitle {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  max-width: 680px;
+  line-height: 1.4;
+}
+
+.modeToggleGroup {
+  display: inline-flex;
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  gap: 2px;
+}
+
+.modeBtn {
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-family: var(--type-mono, monospace);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.modeBtn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.modeBtnActive {
+  color: #00F0FF;
+  background: rgba(0, 240, 255, 0.12);
+  border: 1px solid rgba(0, 240, 255, 0.3);
+}
+
+.modeBtnActiveReplay {
+  color: #F59E0B;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+/* Warnings and Notices */
+.warningBanner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: var(--radius-sm);
+  color: #F59E0B;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.historicalNotice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: var(--radius-sm);
+  color: #C4B5FD;
+  font-size: 0.82rem;
+  font-family: var(--type-mono, monospace);
+}
+
+.historicalTag {
+  background: rgba(139, 92, 246, 0.25);
+  color: #DDD6FE;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+}
+
+/* Replay Scrubber Controls */
+.replayDeck {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+}
+
+.replayControlsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.playbackGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.playbackBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.playbackBtn:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: var(--line-strong);
+  color: #00F0FF;
+}
+
+.playbackBtn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.playbackBtnPlay {
+  width: 40px;
+  height: 34px;
+  background: rgba(0, 240, 255, 0.15);
+  border-color: rgba(0, 240, 255, 0.4);
+  color: #00F0FF;
+  font-weight: 700;
+}
+
+.speedSelect {
+  display: inline-flex;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.speedOption {
+  background: transparent;
+  border: none;
+  font-size: 0.72rem;
+  font-family: var(--type-mono, monospace);
+  color: var(--text-secondary);
+  padding: 3px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.speedOptionActive {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.versionScrubberTrack {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.scrubberSlider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  background: var(--surface-3);
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+}
+
+.scrubberSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #00F0FF;
+  box-shadow: 0 0 8px rgba(0, 240, 255, 0.6);
+  cursor: pointer;
+  border: 2px solid #0D1520;
+}
+
+.versionBadge {
+  font-family: var(--type-mono, monospace);
+  font-size: 0.78rem;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(0, 240, 255, 0.12);
+  color: #00F0FF;
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.stateMetricsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.metricCard {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.metricValue {
+  font-size: 1.2rem;
+  font-weight: 700;
+  font-family: var(--type-mono, monospace);
+  color: var(--text-primary);
+}
+
+.metricLabel {
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 2px;
+}
+
+/* Timeline Nodes & Streams */
+.filterPills {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.streamPill {
+  font-size: 0.65rem;
+  font-family: var(--type-mono, monospace);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.streamIncident {
+  background: rgba(0, 240, 255, 0.15);
+  color: #00F0FF;
+  border: 1px solid rgba(0, 240, 255, 0.3);
+}
+
+.streamInvestigation {
+  background: rgba(245, 158, 11, 0.15);
+  color: #F59E0B;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.timeConfidenceBadge {
+  font-size: 0.62rem;
+  font-family: var(--type-mono, monospace);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.confidenceConfirmed {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ADE80;
+}
+
+.confidenceApprox {
+  background: rgba(245, 158, 11, 0.15);
+  color: #FBBF24;
+}
+
+.confidenceRecordedOnly {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94A3B8;
+}
+
+.provenanceBox {
+  margin-top: var(--space-2);
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 2px solid rgba(0, 240, 255, 0.4);
+  font-size: 0.72rem;
+  font-family: var(--type-mono, monospace);
+  color: var(--text-secondary);
+}
+
+/* Replay State Sections */
+.statePanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.sectionHeader {
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-family: var(--type-mono, monospace);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.stateCard {
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  padding: var(--space-4);
+}
+
+.cursorActivityCard {
+  background: rgba(0, 240, 255, 0.03);
+  border: 1px solid rgba(0, 240, 255, 0.2);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  font-size: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tableList {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.tableList th {
+  text-align: left;
+  padding: 6px 10px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--line);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.tableList td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.badgeCanonical {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ADE80;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.badgeInferred {
+  background: rgba(245, 158, 11, 0.15);
+  color: #FBBF24;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.badgeRejected {
+  background: rgba(239, 68, 68, 0.15);
+  color: #F87171;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 700;
+}

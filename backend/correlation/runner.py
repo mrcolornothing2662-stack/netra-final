@@ -287,6 +287,8 @@ async def run_case_correlations(db: AsyncSession, case: Case) -> dict[str, Any]:
                 target_entity_id=entity_v.id,
                 relationship_type=RT.ASSOCIATED_WITH,
                 epistemic_status=RT.INFERRED,
+                verification_status=RT.REVIEW_UNREVIEWED,
+                is_canonical=False,
                 direction=RT.BIDIRECTIONAL,
                 confidence=score,
                 evidence_refs=ev_refs,

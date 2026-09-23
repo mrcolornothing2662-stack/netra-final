@@ -7,3 +7,6 @@ export * from "./cognitive";
 export * from "./intelligence";
 export * from "./reports";
 export * from "./system";
+export * from "./entities";
+export * from "./timeline";
+export * from "./lenses";

@@ -12,11 +12,13 @@ import { EvidenceTab } from "./tabs/EvidenceTab";
 import { EntitiesTab } from "./tabs/EntitiesTab";
 import { NetworkTab } from "./tabs/NetworkTab";
 import { TimelineTab } from "./tabs/TimelineTab";
+import { ForensicLenses } from "./tabs/ForensicLenses";
 import { AnalysisTab } from "./tabs/AnalysisTab";
 import { CognitiveTab } from "./tabs/CognitiveTab";
 import { AgentTab } from "./tabs/AgentTab";
 import { ReportTab } from "./tabs/ReportTab";
 import { CaseEditModal } from "../../components/case/CaseEditModal";
+import { SyncStatus } from "../../components/case/SyncStatus";
 import { caseById } from "../../data/corpus";
 import { useFlipIn } from "../../lib/flip";
 import { useLiveStore } from "../../state/useLiveStore";
@@ -99,7 +101,7 @@ export function CaseScreen() {
 
   const showDemoBadge = isDemo || c.source_type === "SYNTHETIC_DEMO";
 
-  const VALID_TABS: CaseTabId[] = ["overview", "notes", "evidence", "entities", "network", "timeline", "analysis", "cognitive", "agent", "report"];
+  const VALID_TABS: CaseTabId[] = ["overview", "notes", "evidence", "entities", "network", "timeline", "lenses", "analysis", "cognitive", "agent", "report"];
   const activeTab: CaseTabId = VALID_TABS.includes(tab as CaseTabId) ? (tab as CaseTabId) : "overview";
 
   const [showEdit, setShowEdit] = useState(false);
@@ -138,11 +140,14 @@ export function CaseScreen() {
             </button>
           )}
         </div>
-        <div className={s.status}>
-          <span className={s.dot} />
-          <span>{c.status === "ACTIVE" ? "Active investigation" : c.status}</span>
-          <span className={s.upd}>· Updated {c.updated}</span>
-          <PriorityMark priority={c.priority} />
+        <div className={s.status} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span className={s.dot} />
+            <span>{c.status === "ACTIVE" ? "Active investigation" : c.status}</span>
+            <span className={s.upd}>· Updated {c.updated}</span>
+            <PriorityMark priority={c.priority} />
+          </div>
+          <SyncStatus caseId={c.id} onSyncCompleted={() => fetchCaseDetails(caseId)} />
         </div>
       </Block>
 
@@ -163,6 +168,7 @@ export function CaseScreen() {
         {activeTab === "entities" && <EntitiesTab onOpenEvidence={() => navigate(`/investigations/${c.id}/evidence`)} />}
         {activeTab === "network" && <NetworkTab caseId={c.id} />}
         {activeTab === "timeline" && <TimelineTab caseId={c.id} onOpenEvidence={() => navigate(`/investigations/${c.id}/evidence`)} />}
+        {activeTab === "lenses" && <ForensicLenses caseId={c.id} onOpenEvidence={() => navigate(`/investigations/${c.id}/evidence`)} />}
         {activeTab === "analysis" && <AnalysisTab caseId={c.id} onOpenEvidence={() => navigate(`/investigations/${c.id}/evidence`)} />}
         {activeTab === "cognitive" && <CognitiveTab caseId={c.id} />}
         {activeTab === "agent" && <AgentTab caseId={c.id} />}

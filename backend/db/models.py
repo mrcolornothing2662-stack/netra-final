@@ -55,7 +55,10 @@ class User(Base):
     verified_links  = relationship("Correlation", back_populates="verifier")
 
     __table_args__ = (
-        CheckConstraint("role IN ('constable','io','fiu_analyst','admin')", name="ck_users_role"),
+        CheckConstraint(
+            "role IN ('constable','io','fiu_analyst','admin','supervisor','INVESTIGATOR','MANAGER','ADMIN','investigator','manager')",
+            name="ck_users_role"
+        ),
     )
 
 
@@ -75,8 +78,12 @@ class Case(Base):
     status              = Column(String(32), nullable=False, default="open")
     assigned_officer_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     tags                = Column(ARRAY(Text))
+    state_version       = Column(Integer, nullable=False, default=1)
+    closed_by           = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    closure_reason      = Column(Text, nullable=True)
     created_at          = Column(DateTime(timezone=True), server_default=func.now())
     updated_at          = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    last_activity_at    = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     closed_at           = Column(DateTime(timezone=True))
 
     # relationships
@@ -90,11 +97,25 @@ class Case(Base):
     analysis_runs    = relationship("AnalysisRun", back_populates="case", cascade="all, delete-orphan")
     intelligence_state = relationship("CaseIntelligenceState", back_populates="case", uselist=False, cascade="all, delete-orphan")
 
+    # NETRA V5 Investigation Brain associations
+    investigation_states  = relationship("InvestigationState", back_populates="case", cascade="all, delete-orphan")
+    activities            = relationship("InvestigationActivity", back_populates="case", cascade="all, delete-orphan")
+    identity_candidates   = relationship("IdentityCandidate", back_populates="case", cascade="all, delete-orphan")
+    hypotheses            = relationship("Hypothesis", back_populates="case", cascade="all, delete-orphan")
+    investigation_actions = relationship("InvestigationAction", back_populates="case", cascade="all, delete-orphan")
+    information_gaps      = relationship("InformationGap", back_populates="case", cascade="all, delete-orphan")
+    sync_conflicts        = relationship("SyncConflictRecord", back_populates="case", cascade="all, delete-orphan")
+    report_snapshots      = relationship("ReportSnapshot", back_populates="case", cascade="all, delete-orphan")
+
     __table_args__ = (
         CheckConstraint("priority IN ('high','medium','low')", name="ck_cases_priority"),
-        CheckConstraint("status IN ('open','in_progress','under_review','closed','on_hold')", name="ck_cases_status"),
+        CheckConstraint(
+            "status IN ('open','in_progress','under_review','closed','on_hold','NEW','ACTIVE','UNDER_REVIEW','SUSPENDED','CLOSED')",
+            name="ck_cases_status"
+        ),
         Index("idx_cases_status", "status"),
         Index("idx_cases_priority", "priority"),
+        Index("idx_cases_state_version", "state_version"),
     )
 
 
@@ -113,6 +134,11 @@ class EvidenceFile(Base):
     sha256_hash     = Column(String(64), nullable=False)
     storage_path    = Column(Text, nullable=False)
     upload_status   = Column(String(32), nullable=False, default="pending")
+    integrity_status = Column(String(32), nullable=False, default="verified")  # verified, unverified, compromised
+    original_immutable = Column(Boolean, nullable=False, default=True)
+    last_verified_at = Column(DateTime(timezone=True), nullable=True)
+    retention_class = Column(String(32), nullable=True, default="standard")
+    access_policy   = Column(String(32), nullable=True, default="restricted")
     parse_error     = Column(Text)
     uploaded_by     = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     uploaded_at     = Column(DateTime(timezone=True), server_default=func.now())
@@ -296,41 +322,72 @@ class Relationship(Base):
 
     Unlike a raw co-occurrence projection, every row carries:
       • a semantic relationship_type (TRANSFERRED_TO, CALLED, MESSAGED, …)
-      • an epistemic_status — OBSERVED (evidence-backed) or INFERRED (cognitive)
+      • an epistemic_status — OBSERVED, INFERRED, or INVESTIGATOR_ADDED
+      • verification_status — UNREVIEWED, ACCEPTED, or REJECTED
       • evidence_refs / event_refs provenance for forensic traceability
       • confidence plus engine/component metadata for inferred links
+      • state_version for lightweight generation tracking
 
     Observed edges are materialised at ingestion; inferred edges are written by
     cognitive engines. They share this table so one graph can express both.
     """
     __tablename__ = "relationships"
 
-    id                = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    case_id           = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
-    source_entity_id  = Column(UUID(as_uuid=True), ForeignKey("entities.id", ondelete="CASCADE"), nullable=False)
-    target_entity_id  = Column(UUID(as_uuid=True), ForeignKey("entities.id", ondelete="CASCADE"), nullable=False)
-    relationship_type = Column(String(32), nullable=False)
-    direction         = Column(String(16), nullable=False, default="OUTBOUND")
-    epistemic_status  = Column(String(16), nullable=False, default="OBSERVED")
-    confidence        = Column(Float, nullable=False, default=1.0)
-    amount            = Column(Float)
-    event_timestamp   = Column(DateTime(timezone=True))
-    first_seen        = Column(DateTime(timezone=True))
-    last_seen         = Column(DateTime(timezone=True))
-    observation_count = Column(Integer, nullable=False, default=1)
-    attributes        = Column(JSONB, default=dict)
-    evidence_refs     = Column(JSONB, default=list)
-    event_refs        = Column(JSONB, default=list)
-    source_engine     = Column(String(64))
-    engine_version    = Column(String(32))
-    component_scores  = Column(JSONB, default=dict)
-    reason_codes      = Column(JSONB, default=list)
-    created_at        = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at        = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    id                  = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id             = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    source_entity_id    = Column(UUID(as_uuid=True), ForeignKey("entities.id", ondelete="CASCADE"), nullable=False)
+    target_entity_id    = Column(UUID(as_uuid=True), ForeignKey("entities.id", ondelete="CASCADE"), nullable=False)
+    relationship_type   = Column(String(32), nullable=False)
+    direction           = Column(String(16), nullable=False, default="OUTBOUND")
+    epistemic_status    = Column(String(32), nullable=False, default="OBSERVED")
+    confidence          = Column(Float, nullable=False, default=1.0)
+    amount              = Column(Float)
+    event_timestamp     = Column(DateTime(timezone=True))
+    first_seen          = Column(DateTime(timezone=True))
+    last_seen           = Column(DateTime(timezone=True))
+    observation_count   = Column(Integer, nullable=False, default=1)
+    attributes          = Column(JSONB, default=dict)
+    evidence_refs       = Column(JSONB, default=list)
+    event_refs          = Column(JSONB, default=list)
+    source_engine       = Column(String(64))
+    engine_version      = Column(String(32))
+    component_scores    = Column(JSONB, default=dict)
+    reason_codes        = Column(JSONB, default=list)
+    created_by          = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    verified_by         = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    verification_status = Column(String(32), nullable=False, default="UNREVIEWED")
+    state_version       = Column(Integer, nullable=False, default=1)
+    created_at          = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at          = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     case          = relationship("Case", back_populates="relationships")
     source_entity = relationship("Entity", foreign_keys=[source_entity_id])
     target_entity = relationship("Entity", foreign_keys=[target_entity_id])
+
+    @property
+    def is_canonical(self) -> bool:
+        from graph import relationship_types as RT
+        return RT.is_canonical_eligible(self.epistemic_status, self.verification_status)
+
+    @is_canonical.setter
+    def is_canonical(self, val: bool) -> None:
+        pass
+
+    @property
+    def reviewed_by(self):
+        return self.verified_by
+
+    @reviewed_by.setter
+    def reviewed_by(self, val):
+        self.verified_by = val
+
+    @property
+    def reviewed_at(self):
+        return self.updated_at
+
+    @reviewed_at.setter
+    def reviewed_at(self, val):
+        self.updated_at = val
 
     __table_args__ = (
         UniqueConstraint(
@@ -339,8 +396,12 @@ class Relationship(Base):
             name="uq_relationships_edge",
         ),
         CheckConstraint(
-            "epistemic_status IN ('OBSERVED','INFERRED')",
+            "epistemic_status IN ('OBSERVED','INFERRED','INVESTIGATOR_ADDED')",
             name="ck_relationships_epistemic_status",
+        ),
+        CheckConstraint(
+            "verification_status IN ('UNREVIEWED','ACCEPTED','REJECTED')",
+            name="ck_relationships_verification_status",
         ),
         CheckConstraint(
             "direction IN ('OUTBOUND','INBOUND','BIDIRECTIONAL')",
@@ -366,27 +427,33 @@ class InvestigationFinding(Base):
     """
     __tablename__ = "findings"
 
-    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    case_id          = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
-    fingerprint      = Column(String(64), nullable=False)
-    finding_type     = Column(String(48), nullable=False)
-    title            = Column(String(512), nullable=False)
-    description      = Column(Text)
-    confidence       = Column(Float)
-    severity         = Column(String(16), nullable=False, default="MEDIUM")
-    status           = Column(String(24), nullable=False, default="OPEN")
-    source_engine    = Column(String(64))
-    engine_version   = Column(String(32))
-    entity_refs      = Column(JSONB, default=list)
-    event_refs       = Column(JSONB, default=list)
-    evidence_refs    = Column(JSONB, default=list)
-    component_scores = Column(JSONB, default=dict)
-    reason_codes     = Column(JSONB, default=list)
-    reasoning        = Column(Text)
-    citations        = Column(JSONB, default=list)
-    observed_at      = Column(DateTime(timezone=True))
-    created_at       = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at       = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    id                        = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id                   = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    fingerprint               = Column(String(64), nullable=False)
+    finding_type              = Column(String(48), nullable=False)
+    title                     = Column(String(512), nullable=False)
+    description               = Column(Text)
+    confidence                = Column(Float)
+    severity                  = Column(String(16), nullable=False, default="MEDIUM")
+    status                    = Column(String(24), nullable=False, default="OPEN")
+    source_engine             = Column(String(64))
+    engine_version            = Column(String(32))
+    entity_refs               = Column(JSONB, default=list)
+    event_refs                = Column(JSONB, default=list)
+    evidence_refs             = Column(JSONB, default=list)
+    supporting_refs           = Column(JSONB, default=list)
+    contradicting_refs        = Column(JSONB, default=list)
+    missing_information       = Column(JSONB, default=list)
+    suggested_actions         = Column(JSONB, default=list)
+    component_scores          = Column(JSONB, default=dict)
+    reason_codes              = Column(JSONB, default=list)
+    reasoning                 = Column(Text)
+    citations                 = Column(JSONB, default=list)
+    observed_at               = Column(DateTime(timezone=True))
+    generated_at_case_version = Column(Integer, nullable=True, default=1)
+    freshness_status          = Column(String(32), nullable=False, default="CURRENT")
+    created_at                = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at                = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     case = relationship("Case", back_populates="findings")
 
@@ -400,10 +467,15 @@ class InvestigationFinding(Base):
             "status IN ('OPEN','CONFIRMED','DISMISSED','SUPERSEDED')",
             name="ck_findings_status",
         ),
+        CheckConstraint(
+            "freshness_status IN ('CURRENT','NEEDS_REVIEW','STALE','RECOMPUTING','SUPERSEDED','INVALIDATED')",
+            name="ck_findings_freshness_status",
+        ),
         Index("idx_findings_case_id", "case_id"),
         Index("idx_findings_type", "finding_type"),
         Index("idx_findings_severity", "severity"),
         Index("idx_findings_status", "status"),
+        Index("idx_findings_freshness", "freshness_status"),
     )
 
 
@@ -589,3 +661,310 @@ class SandboxFirewallRule(Base):
     owner_team       = Column(String(64))
     last_modified_by = Column(String(128))
     last_modified_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── NETRA V5 Investigation Brain Tables ──────────────────────────────────────
+
+class InvestigationState(Base):
+    """Immutable state generation checkpoint for a case."""
+    __tablename__ = "investigation_state"
+
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id      = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    version      = Column(Integer, nullable=False, default=1)
+    state_hash   = Column(String(64), nullable=True)
+    created_at   = Column(DateTime(timezone=True), server_default=func.now())
+    created_by   = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    case         = relationship("Case", back_populates="investigation_states")
+
+    __table_args__ = (
+        UniqueConstraint("case_id", "version", name="uq_investigation_state_case_version"),
+        Index("idx_investigation_state_case_version", "case_id", "version"),
+    )
+
+
+class InvestigationActivity(Base):
+    """Investigation audit and activity stream for investigator operations."""
+    __tablename__ = "investigation_activity"
+
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id       = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    actor_id      = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    activity_type = Column(String(64), nullable=False)
+    target_type   = Column(String(64), nullable=True)
+    target_id     = Column(String(128), nullable=True)
+    before_state  = Column(JSONB, default=dict)
+    after_state   = Column(JSONB, default=dict)
+    reason        = Column(Text, nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+
+    case  = relationship("Case", back_populates="activities")
+    actor = relationship("User", foreign_keys=[actor_id])
+
+    __table_args__ = (
+        Index("idx_investigation_activity_case_created", "case_id", "created_at"),
+    )
+
+
+class IdentityCandidate(Base):
+    """Identity ambiguity and duplicate candidate resolution tracking."""
+    __tablename__ = "identity_candidates"
+
+    id                  = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id             = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    canonical_entity_id = Column(UUID(as_uuid=True), ForeignKey("entities.id", ondelete="CASCADE"), nullable=True)
+    candidate_value     = Column(String(512), nullable=False)
+    candidate_type      = Column(String(32), nullable=False)
+    source_refs         = Column(JSONB, default=list)
+    supporting_refs     = Column(JSONB, default=list)
+    contradicting_refs  = Column(JSONB, default=list)
+    resolution_status   = Column(String(32), nullable=False, default="UNRESOLVED")
+    created_by          = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at          = Column(DateTime(timezone=True), server_default=func.now())
+    resolved_at         = Column(DateTime(timezone=True), nullable=True)
+
+    case   = relationship("Case", back_populates="identity_candidates")
+    entity = relationship("Entity", foreign_keys=[canonical_entity_id])
+
+    __table_args__ = (
+        CheckConstraint(
+            "resolution_status IN ('UNRESOLVED','LIKELY_SAME','LIKELY_DIFFERENT','CONFIRMED_SAME','CONFIRMED_DIFFERENT','REJECTED')",
+            name="ck_identity_candidates_status"
+        ),
+        Index("idx_identity_candidates_case", "case_id"),
+    )
+
+
+class Hypothesis(Base):
+    """Formal hypothesis tracking competing investigative theories."""
+    __tablename__ = "hypotheses"
+
+    id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id     = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    title       = Column(String(512), nullable=False)
+    description = Column(Text, nullable=True)
+    status      = Column(String(32), nullable=False, default="OPEN")
+    created_by  = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at  = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at  = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    case     = relationship("Case", back_populates="hypotheses")
+    creator  = relationship("User", foreign_keys=[created_by])
+    evidence = relationship("HypothesisEvidence", back_populates="hypothesis", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        CheckConstraint("status IN ('OPEN','VALIDATED','REFUTED','SUSPENDED')", name="ck_hypotheses_status"),
+        Index("idx_hypotheses_case_id", "case_id"),
+    )
+
+
+class HypothesisEvidence(Base):
+    """Link between hypothesis and evidence/finding support or contradiction."""
+    __tablename__ = "hypothesis_evidence"
+
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    hypothesis_id = Column(UUID(as_uuid=True), ForeignKey("hypotheses.id", ondelete="CASCADE"), nullable=False)
+    evidence_id   = Column(UUID(as_uuid=True), ForeignKey("evidence_files.id", ondelete="CASCADE"), nullable=True)
+    finding_id    = Column(UUID(as_uuid=True), ForeignKey("findings.id", ondelete="CASCADE"), nullable=True)
+    relation      = Column(String(16), nullable=False, default="SUPPORTS") # SUPPORTS, CONTRADICTS, NEUTRAL
+    reason        = Column(Text, nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+
+    hypothesis = relationship("Hypothesis", back_populates="evidence")
+    evidence   = relationship("EvidenceFile")
+    finding    = relationship("InvestigationFinding")
+
+    __table_args__ = (
+        CheckConstraint("relation IN ('SUPPORTS','CONTRADICTS','NEUTRAL')", name="ck_hypo_evidence_relation"),
+        Index("idx_hypo_evidence_hypo", "hypothesis_id"),
+    )
+
+
+class InvestigationAction(Base):
+    """Actionable investigation recommendations and tasks."""
+    __tablename__ = "investigation_actions"
+
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id      = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    action_type  = Column(String(64), nullable=False)
+    description  = Column(Text, nullable=False)
+    priority     = Column(String(16), nullable=False, default="MEDIUM")
+    status       = Column(String(32), nullable=False, default="SUGGESTED")
+    source       = Column(String(64), default="cognitive_engine")
+    created_by   = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by  = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at   = Column(DateTime(timezone=True), server_default=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    case = relationship("Case", back_populates="investigation_actions")
+
+    __table_args__ = (
+        CheckConstraint("priority IN ('LOW','MEDIUM','HIGH','CRITICAL')", name="ck_investigation_actions_priority"),
+        CheckConstraint("status IN ('SUGGESTED','APPROVED','IN_PROGRESS','COMPLETED','REJECTED','CANCELLED')", name="ck_investigation_actions_status"),
+        Index("idx_investigation_actions_case", "case_id"),
+    )
+
+
+class InformationGap(Base):
+    """Explicitly tracked missing pieces of evidence or unresolved questions."""
+    __tablename__ = "information_gaps"
+
+    id               = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id          = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    description      = Column(Text, nullable=False)
+    importance       = Column(String(16), nullable=False, default="MEDIUM")
+    related_entities = Column(JSONB, default=list)
+    related_findings = Column(JSONB, default=list)
+    status           = Column(String(32), nullable=False, default="OPEN")
+    created_at       = Column(DateTime(timezone=True), server_default=func.now())
+
+    case = relationship("Case", back_populates="information_gaps")
+
+    __table_args__ = (
+        CheckConstraint("importance IN ('LOW','MEDIUM','HIGH','CRITICAL')", name="ck_information_gaps_importance"),
+        CheckConstraint("status IN ('OPEN','RESOLVED','DISMISSED')", name="ck_information_gaps_status"),
+        Index("idx_information_gaps_case", "case_id"),
+    )
+
+
+# ── NETRA V5 Offline Synchronization ─────────────────────────────────────────
+
+class SyncProcessedMutation(Base):
+    """
+    Tracks processed offline mutations to guarantee idempotency (Invariant 1).
+    Same mutation_id resubmitted from client produces idempotent response.
+    """
+    __tablename__ = "sync_processed_mutations"
+
+    mutation_id          = Column(String(64), primary_key=True)
+    device_id            = Column(String(64), nullable=False)
+    actor_id             = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    case_id              = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    command_type         = Column(String(64), nullable=False)
+    base_state_version   = Column(Integer, nullable=False)
+    server_state_version = Column(Integer, nullable=False)
+    outcome              = Column(String(32), nullable=False)  # APPLIED, REBASED, DUPLICATE_IGNORED
+    applied_at           = Column(DateTime(timezone=True), server_default=func.now())
+    activity_id          = Column(UUID(as_uuid=True), ForeignKey("investigation_activity.id", ondelete="SET NULL"), nullable=True)
+
+    case     = relationship("Case")
+    actor    = relationship("User")
+    activity = relationship("InvestigationActivity")
+
+    __table_args__ = (
+        Index("idx_sync_mutations_case", "case_id"),
+        Index("idx_sync_mutations_device", "device_id"),
+    )
+
+
+class SyncConflictRecord(Base):
+    """
+    Tracks conflicting mutations requiring investigator adjudication (Invariant 7).
+    Never silently overwrites another investigator's work or freezes the case.
+    """
+    __tablename__ = "sync_conflicts"
+
+    id                   = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    mutation_id          = Column(String(64), nullable=False, unique=True)
+    device_id            = Column(String(64), nullable=False)
+    actor_id             = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    case_id              = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    command_type         = Column(String(64), nullable=False)
+    client_payload       = Column(JSONB, default=dict)
+    base_state_version   = Column(Integer, nullable=False)
+    server_state_version = Column(Integer, nullable=False)
+    conflict_type        = Column(String(64), nullable=False)  # IDENTITY_DECISION_CONFLICT, RELATIONSHIP_REVIEW_CONFLICT, FINDING_REVIEW_CONFLICT, STALE_TARGET_NOT_FOUND
+    server_current_state = Column(JSONB, default=dict)
+    status               = Column(String(32), nullable=False, default="PENDING_REVIEW")  # PENDING_REVIEW, RESOLVED_KEEP_SERVER, RESOLVED_APPLY_OFFLINE, DISCARDED
+    resolution_rationale = Column(Text, nullable=True)
+    resolved_by          = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolved_at          = Column(DateTime(timezone=True), nullable=True)
+    created_at           = Column(DateTime(timezone=True), server_default=func.now())
+
+    case     = relationship("Case", back_populates="sync_conflicts")
+    actor    = relationship("User", foreign_keys=[actor_id])
+    resolver = relationship("User", foreign_keys=[resolved_by])
+
+    __table_args__ = (
+        CheckConstraint("status IN ('PENDING_REVIEW','RESOLVED_KEEP_SERVER','RESOLVED_APPLY_OFFLINE','DISCARDED')", name="ck_sync_conflicts_status"),
+        Index("idx_sync_conflicts_case", "case_id"),
+        Index("idx_sync_conflicts_status", "status"),
+    )
+
+
+# ── Milestone 8: Report Snapshots ────────────────────────────────────────────
+
+class ReportSnapshot(Base):
+    """
+    Milestone 8: Immutable, reproducible investigation report snapshot.
+    Freezes a specific case state version and content hash. Old reports are
+    never silently regenerated against newer case state.
+    """
+    __tablename__ = "report_snapshots"
+
+    id                           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    case_id                      = Column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
+    report_type                  = Column(String(64), nullable=False)  # "intelligence_brief" | "formal_dossier"
+    status                       = Column(String(32), nullable=False, default="DRAFT")  # DRAFT, REVIEW, READY_FOR_EXPORT, APPROVED, EXPORTED, REJECTED
+    case_state_version           = Column(Integer, nullable=False, default=1)
+    template_version             = Column(String(32), nullable=False, default="v1.0")
+    content_hash                 = Column(String(64), nullable=False)  # SHA-256 of canonical report JSON
+    title                        = Column(String(256), nullable=False)
+    summary                      = Column(Text, nullable=True)
+    claims_count                 = Column(Integer, nullable=False, default=0)
+    linked_claims_count          = Column(Integer, nullable=False, default=0)
+    review_required_claims_count = Column(Integer, nullable=False, default=0)
+    payload                      = Column(JSONB, nullable=False)  # Full report data tree with sections and claims
+    generated_by                 = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    generated_at                 = Column(DateTime(timezone=True), server_default=func.now())
+    approved_by                  = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at                  = Column(DateTime(timezone=True), nullable=True)
+    rejection_reason             = Column(Text, nullable=True)
+    export_approval_id           = Column(UUID(as_uuid=True), ForeignKey("dossier_export_approvals.id", ondelete="SET NULL"), nullable=True)
+
+    case            = relationship("Case", back_populates="report_snapshots")
+    generator       = relationship("User", foreign_keys=[generated_by])
+    approver        = relationship("User", foreign_keys=[approved_by])
+    export_approval = relationship("DossierExportApproval")
+
+    __table_args__ = (
+        CheckConstraint("status IN ('DRAFT','REVIEW','READY_FOR_EXPORT','APPROVED','EXPORTED','REJECTED')", name="ck_report_snapshots_status"),
+        CheckConstraint("report_type IN ('intelligence_brief','formal_dossier')", name="ck_report_snapshots_type"),
+        Index("idx_report_snapshots_case", "case_id"),
+        Index("idx_report_snapshots_status", "status"),
+        Index("idx_report_snapshots_case_version", "case_id", "case_state_version"),
+    )
+
+
+# ── Milestone 9: User Sessions & Device Trust ────────────────────────────────
+
+class UserSession(Base):
+    """
+    Milestone 9: Active user session record linking an authentication context
+    with a specific device identifier, authentication trust level, and revocation state.
+    """
+    __tablename__ = "user_sessions"
+
+    id                   = Column(String(64), primary_key=True)  # session UUID string
+    user_id              = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    device_id            = Column(String(64), nullable=False)
+    issued_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at           = Column(DateTime(timezone=True), nullable=False)
+    last_seen            = Column(DateTime(timezone=True), server_default=func.now())
+    authentication_level = Column(String(32), default="standard", nullable=False)  # standard, elevated, supervisor
+    revoked              = Column(Boolean, default=False, nullable=False)
+    revoked_reason       = Column(String(256), nullable=True)
+    ip_address           = Column(String(64), nullable=True)
+    user_agent           = Column(String(256), nullable=True)
+
+    user = relationship("User", backref=backref("sessions", cascade="all, delete-orphan", lazy="selectin"))
+
+    __table_args__ = (
+        CheckConstraint("authentication_level IN ('standard', 'elevated', 'supervisor')", name="ck_user_sessions_auth_level"),
+        Index("idx_user_sessions_user_id", "user_id"),
+        Index("idx_user_sessions_device_id", "device_id"),
+        Index("idx_user_sessions_revoked", "revoked"),
+    )
+
+

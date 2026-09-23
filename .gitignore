@@ -10,6 +10,9 @@ frontend/.env.local
 !.env.example
 !backend/.env.example
 !frontend/.env.example
+.demo_credentials.json
+*.credentials.json
+*.local.json
 
 # Python & Virtual Environments
 backend/venv

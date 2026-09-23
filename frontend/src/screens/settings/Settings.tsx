@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Block } from "../../app/transitions";
 import { systemApi, officersApi, type SystemHealth, type AuditVerification, type Officer } from "../../api/system";
+import { securityApi, type SecurityOverview, type SecurityEvent, type UserSessionItem } from "../../api/security";
 import { getStoredUser, logout } from "../../api/client";
 import { Button } from "../../components/primitives/Button";
 import { Icon } from "../../components/icons";
@@ -89,15 +90,49 @@ export function Settings() {
     }
   };
 
+  // Security Event Center State (Milestone 9)
+  const [securityOverview, setSecurityOverview] = useState<SecurityOverview | null>(null);
+  const [securityEvents, setSecurityEvents] = useState<SecurityEvent[]>([]);
+  const [securityCat, setSecurityCat] = useState<string>("all");
+  const [activeSessions, setActiveSessions] = useState<UserSessionItem[]>([]);
+  const [loadingSecurity, setLoadingSecurity] = useState(false);
+
+  const fetchSecurityCenter = async () => {
+    setLoadingSecurity(true);
+    try {
+      const [ov, evs, sess] = await Promise.all([
+        securityApi.overview().catch(() => null),
+        securityApi.events(securityCat, 1, 25).catch(() => null),
+        securityApi.sessions().catch(() => []),
+      ]);
+      if (ov) setSecurityOverview(ov);
+      if (evs?.items) setSecurityEvents(evs.items);
+      if (sess) setActiveSessions(sess);
+    } finally {
+      setLoadingSecurity(false);
+    }
+  };
+
+  const handleRevokeSession = async (sessionId: string) => {
+    try {
+      await securityApi.revokeSession(sessionId, "Revoked from Security Event Center");
+      notify(`Session ${sessionId.slice(0, 8)}… successfully revoked.`);
+      fetchSecurityCenter();
+    } catch {
+      notify("Failed to revoke session.");
+    }
+  };
+
   useEffect(() => {
     if (activeCat === "Diagnostics") {
       fetchDiagnostics();
     } else if (activeCat === "Security") {
       fetchDiagnostics();
+      fetchSecurityCenter();
     } else if (activeCat === "Team") {
       fetchOfficers();
     }
-  }, [activeCat]);
+  }, [activeCat, securityCat]);
 
   const handleCreateOfficer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -453,6 +488,181 @@ export function Settings() {
                     Sign Out
                   </Button>
                 </div>
+
+                {/* Milestone 9: Security Event Center */}
+                <div>
+                  <div className="t-label" style={{ marginBottom: "var(--space-3)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span>Security &amp; Audit Event Center</span>
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                      {securityOverview?.status === "HEALTHY" ? "🛡️ LEDGER HEALTHY" : "⚠️ AUDIT CHECK"}
+                    </span>
+                  </div>
+
+                  {/* Telemetry Grid */}
+                  <div style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+                    gap: "var(--space-3)",
+                    marginBottom: "var(--space-4)",
+                  }}>
+                    <div className={s.sectionCard} style={{ padding: "10px 14px", textAlign: "center" }}>
+                      <div className="t-mono-xs" style={{ color: "var(--text-muted)" }}>FAILED AUTH</div>
+                      <div style={{ fontSize: "20px", fontWeight: 700, color: (securityOverview?.metrics.failed_auth_events ?? 0) > 0 ? "var(--warning)" : "var(--verified)" }}>
+                        {securityOverview?.metrics.failed_auth_events ?? 0}
+                      </div>
+                    </div>
+                    <div className={s.sectionCard} style={{ padding: "10px 14px", textAlign: "center" }}>
+                      <div className="t-mono-xs" style={{ color: "var(--text-muted)" }}>DENIALS</div>
+                      <div style={{ fontSize: "20px", fontWeight: 700, color: (securityOverview?.metrics.permission_denials ?? 0) > 0 ? "var(--critical)" : "var(--verified)" }}>
+                        {securityOverview?.metrics.permission_denials ?? 0}
+                      </div>
+                    </div>
+                    <div className={s.sectionCard} style={{ padding: "10px 14px", textAlign: "center" }}>
+                      <div className="t-mono-xs" style={{ color: "var(--text-muted)" }}>EVIDENCE ACCESS</div>
+                      <div style={{ fontSize: "20px", fontWeight: 700, color: "var(--accent)" }}>
+                        {securityOverview?.metrics.evidence_access_events ?? 0}
+                      </div>
+                    </div>
+                    <div className={s.sectionCard} style={{ padding: "10px 14px", textAlign: "center" }}>
+                      <div className="t-mono-xs" style={{ color: "var(--text-muted)" }}>APPROVALS</div>
+                      <div style={{ fontSize: "20px", fontWeight: 700, color: "var(--text-primary)" }}>
+                        {securityOverview?.metrics.report_approvals ?? 0}
+                      </div>
+                    </div>
+                    <div className={s.sectionCard} style={{ padding: "10px 14px", textAlign: "center" }}>
+                      <div className="t-mono-xs" style={{ color: "var(--text-muted)" }}>ACTIVE SESSIONS</div>
+                      <div style={{ fontSize: "20px", fontWeight: 700, color: "var(--verified)" }}>
+                        {securityOverview?.metrics.active_sessions ?? activeSessions.length}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Category Filter Pills */}
+                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "var(--space-4)" }}>
+                    {[
+                      { id: "all", label: "All Events" },
+                      { id: "failed_auth", label: "Failed Auth" },
+                      { id: "evidence_access", label: "Evidence Access" },
+                      { id: "permission_denials", label: "Permission Denials" },
+                      { id: "report_approvals", label: "Report Approvals" },
+                      { id: "exports", label: "Export Events" },
+                      { id: "case_access", label: "Case Access" },
+                      { id: "sessions", label: "Session Events" },
+                    ].map(tab => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setSecurityCat(tab.id)}
+                        style={{
+                          fontSize: "11px",
+                          padding: "4px 10px",
+                          borderRadius: "14px",
+                          border: `1px solid ${securityCat === tab.id ? "var(--accent)" : "var(--line)"}`,
+                          background: securityCat === tab.id ? "rgba(59, 130, 246, 0.15)" : "var(--surface-2)",
+                          color: securityCat === tab.id ? "var(--accent)" : "var(--text-secondary)",
+                          cursor: "pointer",
+                          fontFamily: "var(--font-mono)",
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Filtered Security Events Table */}
+                  <div className={s.sectionCard} style={{ maxHeight: "300px", overflowY: "auto" }}>
+                    {loadingSecurity ? (
+                      <div style={{ padding: "14px", color: "var(--text-muted)", fontSize: "12px" }}>Loading security telemetry…</div>
+                    ) : securityEvents.length === 0 ? (
+                      <div style={{ padding: "14px", color: "var(--text-muted)", fontSize: "12px" }}>No events found in this category.</div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                        {securityEvents.map(ev => (
+                          <div key={ev.id} style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            fontSize: "11px",
+                            padding: "6px 10px",
+                            background: "var(--surface-2)",
+                            borderRadius: "4px",
+                            border: "1px solid var(--line)",
+                          }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                              <span style={{
+                                fontWeight: 700,
+                                fontFamily: "var(--font-mono)",
+                                color: ev.action.includes("DENIED") || ev.action.includes("FAILED") || ev.action.includes("BLOCKED")
+                                  ? "var(--critical)"
+                                  : ev.action.includes("GRANTED") || ev.action.includes("APPROVED") || ev.action.includes("SUCCESS")
+                                    ? "var(--verified)"
+                                    : "var(--accent)",
+                              }}>
+                                {ev.action}
+                              </span>
+                              <span style={{ color: "var(--text-muted)" }}>
+                                {ev.details?.reason ? `(${ev.details.reason})` : ev.resource_type ? `${ev.resource_type}:${(ev.resource_id || "").slice(0, 8)}` : ""}
+                              </span>
+                            </div>
+                            <div className="t-mono-xs" style={{ color: "var(--text-faint)" }}>
+                              {ev.event_timestamp ? new Date(ev.event_timestamp).toLocaleTimeString() : ""}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Milestone 9: Active Device Sessions Table */}
+                {activeSessions.length > 0 && (
+                  <div>
+                    <div className="t-label" style={{ marginBottom: "var(--space-3)" }}>
+                      Active Device &amp; Terminal Sessions ({activeSessions.length})
+                    </div>
+                    <div className={s.sectionCard}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        {activeSessions.map(sess => (
+                          <div key={sess.session_id} style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            fontSize: "11px",
+                            padding: "8px 12px",
+                            background: sess.revoked ? "rgba(239, 68, 68, 0.08)" : "var(--surface-2)",
+                            borderRadius: "4px",
+                            border: `1px solid ${sess.revoked ? "rgba(239, 68, 68, 0.2)" : "var(--line)"}`,
+                          }}>
+                            <div>
+                              <div style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+                                {sess.username} ({sess.role.toUpperCase()}) · <span className="t-mono-xs" style={{ color: "var(--text-muted)" }}>{sess.device_id}</span>
+                              </div>
+                              <div className="t-mono-xs" style={{ color: "var(--text-faint)" }}>
+                                Level: {sess.authentication_level} · IP: {sess.ip_address || "local"} · Last Seen: {sess.last_seen ? new Date(sess.last_seen).toLocaleTimeString() : "active"}
+                                {sess.revoked && <span style={{ color: "var(--critical)", marginLeft: "8px" }}>[REVOKED: {sess.revoked_reason}]</span>}
+                              </div>
+                            </div>
+                            {!sess.revoked && (
+                              <button
+                                onClick={() => handleRevokeSession(sess.session_id)}
+                                style={{
+                                  fontSize: "10px",
+                                  padding: "3px 8px",
+                                  borderRadius: "4px",
+                                  border: "1px solid var(--critical)",
+                                  background: "transparent",
+                                  color: "var(--critical)",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                Revoke
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Full Audit Log Browser */}
                 <div style={{ marginTop: "var(--space-6)" }}>

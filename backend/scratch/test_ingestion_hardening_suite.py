@@ -35,7 +35,9 @@ from httpx import AsyncClient, ASGITransport
 from sqlalchemy import text
 
 # Setup paths
-sys.path.insert(0, "/Users/shubhamrana/netra5.0/backend")
+BACKEND_ROOT = Path(__file__).resolve().parent.parent
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
 from main import app
 from db.session import db_context
 from db.models import User, Case, EvidenceFile, EvidenceEvent, Entity, EntityMention, Relationship

@@ -9,6 +9,8 @@ import { kindCounts } from "../../../data/evidence";
 import type { Evidence, EvidenceKind } from "../../../data/types";
 import { EvidencePreviewModal } from "./EvidencePreviewModal";
 import { evidenceApi, type EvidenceConfirmResponse, type EvidenceConfirmBatchResponse } from "../../../api/evidence";
+import { reportsApi, type EvidenceUsage } from "../../../api/reports";
+import prim from "../../../components/primitives/primitives.module.css";
 import s from "../../../components/case/case.module.css";
 
 export function EvidenceTab({ caseId }: { caseId: string }) {
@@ -27,6 +29,24 @@ export function EvidenceTab({ caseId }: { caseId: string }) {
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sheetCloseRef = useRef<HTMLButtonElement>(null);
+
+  const [usageData, setUsageData] = useState<EvidenceUsage | null>(null);
+  const [loadingUsage, setLoadingUsage] = useState(false);
+
+  useEffect(() => {
+    if (selected?.id) {
+      setLoadingUsage(true);
+      reportsApi.getEvidenceUsage(caseId, selected.id)
+        .then(res => setUsageData(res))
+        .catch(err => {
+          console.warn("Evidence usage fetch error:", err);
+          setUsageData(null);
+        })
+        .finally(() => setLoadingUsage(false));
+    } else {
+      setUsageData(null);
+    }
+  }, [selected?.id, caseId]);
 
   const handleRetry = async (evidenceId: string) => {
     try {
@@ -342,6 +362,130 @@ export function EvidenceTab({ caseId }: { caseId: string }) {
                   </code>
                 </div>
               </div>
+            </div>
+
+            {/* Milestone 9: Controlled Evidence Access / Download */}
+            <div style={{ marginBottom: "var(--space-4)" }}>
+              <button
+                className={prim.btn}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                  fontSize: "12px",
+                  padding: "8px 12px",
+                  background: "var(--surface-2)",
+                  border: "1px solid var(--line-strong)",
+                  color: "var(--text-primary)",
+                  cursor: "pointer",
+                  borderRadius: "var(--radius-input)",
+                }}
+                onClick={() => {
+                  const reason = window.prompt("Section 63 BSA Custody Verification\nEnter operational justification for accessing original evidence bytes:");
+                  if (!reason || reason.trim().length < 5) {
+                    alert("Access denied: An operational justification of at least 5 characters is required under Section 63 BSA.");
+                    return;
+                  }
+                  const url = `/api/v1/evidence/${caseId}/files/${selected.id}/download?reason=${encodeURIComponent(reason.trim())}`;
+                  window.open(url, "_blank");
+                }}
+              >
+                <span>🔒</span> Download Original Artifact (Section 63 BSA)
+              </button>
+            </div>
+
+            {/* Milestone 8: Bidirectional Report & Finding Provenance Usage */}
+            <div style={{
+              marginBottom: "var(--space-6)",
+              padding: "14px 16px",
+              background: "var(--surface-1)",
+              borderRadius: "var(--radius-input)",
+              border: "1px solid var(--line)",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+                <div className="t-label" style={{ color: "var(--text-primary)", fontWeight: 700 }}>
+                  Report &amp; Finding Provenance
+                </div>
+                <span className="t-mono-xs" style={{
+                  color: (usageData?.total_usages ?? 0) > 0 ? "var(--ok)" : "var(--text-muted)",
+                  fontWeight: 700,
+                }}>
+                  {loadingUsage ? "Scanning graph…" : `${usageData?.total_usages ?? 0} Linked Usages`}
+                </span>
+              </div>
+
+              {usageData && usageData.total_usages > 0 ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  {usageData.findings.length > 0 && (
+                    <div>
+                      <div className="t-mono-xs" style={{ color: "var(--text-muted)", marginBottom: "4px" }}>
+                        Citing Findings ({usageData.findings.length}):
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                        {usageData.findings.map(f => (
+                          <div key={f.id} style={{
+                            fontSize: "11px",
+                            padding: "4px 8px",
+                            background: "var(--surface-2)",
+                            borderRadius: "4px",
+                            border: "1px solid var(--line)",
+                          }}>
+                            <span style={{ fontWeight: 700, color: "var(--accent)" }}>[{f.severity}]</span> {f.title}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {usageData.relationships.length > 0 && (
+                    <div>
+                      <div className="t-mono-xs" style={{ color: "var(--text-muted)", marginBottom: "4px" }}>
+                        Citing Graph Relationships ({usageData.relationships.length}):
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                        {usageData.relationships.map(r => (
+                          <div key={r.id} style={{
+                            fontSize: "11px",
+                            padding: "4px 8px",
+                            background: "var(--surface-2)",
+                            borderRadius: "4px",
+                            border: "1px solid var(--line)",
+                          }}>
+                            {r.source_name} <span style={{ color: "var(--accent)" }}>-[{r.rel_type}]-&gt;</span> {r.target_name}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {usageData.claims.length > 0 && (
+                    <div>
+                      <div className="t-mono-xs" style={{ color: "var(--text-muted)", marginBottom: "4px" }}>
+                        Citing Dossier Claims ({usageData.claims.length}):
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                        {usageData.claims.slice(0, 4).map((c, i) => (
+                          <div key={i} style={{
+                            fontSize: "11px",
+                            padding: "4px 8px",
+                            background: "var(--surface-2)",
+                            borderRadius: "4px",
+                            border: "1px solid var(--line)",
+                          }}>
+                            <strong style={{ color: "var(--accent)" }}>{c.claim_id}:</strong> {c.text}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="t-body-xs" style={{ color: "var(--text-muted)" }}>
+                  {loadingUsage ? "Scanning case graph for citations…" : "No analytical findings or claims currently cite this evidence artifact."}
+                </div>
+              )}
             </div>
           </div>
         </>

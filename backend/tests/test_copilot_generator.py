@@ -25,6 +25,17 @@ from copilot.schemas import (
 )
 
 
+from copilot.config import get_copilot_config
+
+
+@pytest.fixture(autouse=True)
+def force_offline_copilot_provider(monkeypatch):
+    monkeypatch.setenv("NETRA_COPILOT_LLM_PROVIDER", "offline")
+    get_copilot_config.cache_clear()
+    yield
+    get_copilot_config.cache_clear()
+
+
 def _sample_prompt(
     query: str = "What amount was transferred through ACC-001?",
     is_empty: bool = False,

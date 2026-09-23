@@ -18,16 +18,17 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import contextlib
-from typing import Any, Generator
+from typing import Any, Generator, Optional, Dict, List
 
 from config import settings
-from db.models import Entity, EntityMention, EvidenceEvent, EvidenceFile, User
+from db.models import Entity, EntityMention, EvidenceEvent, EvidenceFile, IdentityCandidate, User
 from db.session import AsyncSessionLocal, get_db
+from graph.graph_builder import _similarity
 from nlp.entity_validation import validate_entity_candidate
 from routes.auth import get_current_user
 from routes.case_access import require_case_access
@@ -832,6 +833,7 @@ async def _process_evidence_file(evidence_file_id: str | uuid.UUID, file_path: s
                 (e.entity_type, e.canonical_value.lower()): e
                 for e in existing_entities
             }
+            detected_candidates: set[tuple[str, str]] = set()
 
             for idx, evt in enumerate(events):
                 event_id = uuid.uuid4()
@@ -993,6 +995,30 @@ async def _process_evidence_file(evidence_file_id: str | uuid.UUID, file_path: s
                     key = (found.entity_type, canonical_value.lower())
                     entity = entity_cache.get(key)
                     if entity is None:
+                        # Check for identity ambiguity against existing entities before creation
+                        if found.entity_type in ("PER", "LOCATION", "ORG"):
+                            for (other_etype, other_norm), other_ent in list(entity_cache.items()):
+                                if other_etype == found.entity_type and other_norm != canonical_value.lower():
+                                    sim = _similarity(canonical_value, other_ent.canonical_value, found.entity_type)
+                                    if 0.80 <= sim < 1.0:
+                                        pair_key = (min(canonical_value.lower(), other_norm), max(canonical_value.lower(), other_norm))
+                                        if pair_key not in detected_candidates:
+                                            detected_candidates.add(pair_key)
+                                            db.add(IdentityCandidate(
+                                                id=uuid.uuid4(),
+                                                case_id=ev_file.case_id,
+                                                canonical_entity_id=other_ent.id,
+                                                candidate_value=sanitize_db_val(canonical_value),
+                                                candidate_type=found.entity_type,
+                                                source_refs=[{
+                                                    "evidence_file_id": str(ev_file.id),
+                                                    "event_id": str(event.id),
+                                                    "similarity": round(sim, 3),
+                                                    "matched_canonical": other_ent.canonical_value,
+                                                }],
+                                                resolution_status="UNRESOLVED",
+                                            ))
+
                         entity = Entity(
                             id=uuid.uuid4(),
                             case_id=ev_file.case_id,
@@ -1973,14 +1999,21 @@ async def get_version_timeline(
 async def download_evidence(
     case_id: str,
     evidence_id: str,
+    request: Request,
+    reason: Optional[str] = Query(None, description="Operational justification for accessing original evidence"),
     db: AsyncSession = Depends(get_db),
     current: User = Depends(get_current_user),
 ):
     """
     Download seized evidence file.
-    Enforces case access control, decrypts on-the-fly, verifies Section 63 BSA SHA-256 integrity,
-    and logs the download event in the tamper-evident audit ledger.
+    Enforces case access control, strict evidence access justification, device trust,
+    decrypts on-the-fly, verifies Section 63 BSA SHA-256 integrity,
+    and logs the access event in the tamper-evident audit ledger.
     """
+    from investigation.policies import user_has_capability, CAP_EVIDENCE_READ
+    if not user_has_capability(current.role, CAP_EVIDENCE_READ):
+        raise HTTPException(status_code=403, detail="Insufficient permission to access evidence")
+
     case = await require_case_access(db, current, case_id)
     try:
         ev_uuid = uuid.UUID(str(evidence_id))
@@ -1991,24 +2024,61 @@ async def download_evidence(
     if not ev_file or ev_file.case_id != case.id:
         raise HTTPException(404, "Evidence file not found")
 
+    dev_id = request.headers.get("X-Device-ID") or getattr(request.state, "device_id", None) or "device-primary"
+    session_id = getattr(request.state, "session_id", None)
+
+    # Stricter than case access: Operational reason check
+    reason_str = (reason or request.headers.get("X-Access-Reason") or "").strip()
+    from utils.audit import append_audit
+    if not reason_str or len(reason_str) < 5:
+        await append_audit(
+            db,
+            action="EVIDENCE_ACCESS_DENIED",
+            resource_type="evidence_file",
+            resource_id=str(ev_file.id),
+            details={
+                "actor": str(current.username),
+                "case_id": str(case.id),
+                "evidence_id": str(ev_file.id),
+                "device_id": dev_id,
+                "session_id": session_id,
+                "reason": "Missing or insufficient operational justification",
+                "operation": "EVIDENCE_DOWNLOAD",
+                "result": "DENIED",
+            },
+            user_id=str(current.id),
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Evidence access requires explicit operational justification and verified device context under Section 63 BSA",
+        )
+
     plaintext = read_decrypted_bytes(ev_file)
     if hashlib.sha256(plaintext).hexdigest() != ev_file.sha256_hash:
         raise HTTPException(500, "Integrity check failed: Decrypted evidence hash mismatch")
 
-    from utils.audit import append_audit
     await append_audit(
         db,
-        action="EVIDENCE_DOWNLOADED",
+        action="EVIDENCE_ACCESS_GRANTED",
         resource_type="evidence_file",
         resource_id=str(ev_file.id),
         details={
+            "actor": str(current.username),
             "case_id": str(case.id),
+            "evidence_id": str(ev_file.id),
             "case_number": case.case_number,
             "filename": ev_file.original_name,
             "sha256_hash": ev_file.sha256_hash,
+            "device_id": dev_id,
+            "session_id": session_id,
+            "reason": reason_str,
+            "operation": "EVIDENCE_DOWNLOAD",
+            "result": "AUTHORIZED",
         },
         user_id=str(current.id),
     )
+    await db.commit()
 
     from fastapi.responses import Response
     return Response(
@@ -2017,8 +2087,184 @@ async def download_evidence(
         headers={
             "Content-Disposition": f'attachment; filename="{ev_file.original_name}"',
             "X-Evidence-SHA256": ev_file.sha256_hash,
+            "X-BSA-Section": "63",
         },
     )
+
+
+@router.delete("/{case_id}/files/{evidence_id}")
+async def delete_evidence(
+    case_id: str,
+    evidence_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """
+    Delete evidence endpoint with immutability guarantees.
+    Original seized evidence cannot be deleted under Section 63 BSA.
+    """
+    case = await require_case_access(db, current, case_id, write=True)
+    try:
+        ev_uuid = uuid.UUID(str(evidence_id))
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid evidence UUID")
+
+    ev_file = await db.get(EvidenceFile, ev_uuid)
+    if not ev_file or ev_file.case_id != case.id:
+        raise HTTPException(404, "Evidence file not found")
+
+    from utils.audit import append_audit
+    dev_id = request.headers.get("X-Device-ID") or getattr(request.state, "device_id", None) or "device-primary"
+
+    # Immutability negative guarantee: Original evidence can never be deleted
+    if ev_file.original_immutable or ev_file.version_status == "original":
+        await append_audit(
+            db,
+            action="EVIDENCE_MUTATION_BLOCKED",
+            resource_type="evidence_file",
+            resource_id=str(ev_file.id),
+            details={
+                "actor": str(current.username),
+                "case_id": str(case.id),
+                "operation": "DELETE_ORIGINAL",
+                "result": "BLOCKED",
+                "device_id": dev_id,
+                "reason": "Original evidence is immutable under Section 63 BSA",
+            },
+            user_id=str(current.id),
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail="Original seized evidence is immutable under Section 63 BSA and cannot be deleted. Allowed operations create derivatives or analysis artifacts instead.",
+        )
+
+    # If it is a derivative/variant, allow deletion
+    await db.delete(ev_file)
+    await append_audit(
+        db,
+        action="EVIDENCE_VARIANT_DELETED",
+        resource_type="evidence_file",
+        resource_id=str(ev_file.id),
+        details={"case_id": str(case.id), "filename": ev_file.original_name, "device_id": dev_id},
+        user_id=str(current.id),
+    )
+    await db.commit()
+    return {"status": "ok", "message": "Evidence variant deleted."}
+
+
+@router.patch("/{case_id}/files/{evidence_id}")
+@router.put("/{case_id}/files/{evidence_id}")
+async def update_evidence_metadata(
+    case_id: str,
+    evidence_id: str,
+    body: dict[str, Any],
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """
+    Update evidence metadata.
+    Protects original evidence from byte replacement, hash change, or acquisition tampering.
+    """
+    case = await require_case_access(db, current, case_id, write=True)
+    try:
+        ev_uuid = uuid.UUID(str(evidence_id))
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid evidence UUID")
+
+    ev_file = await db.get(EvidenceFile, ev_uuid)
+    if not ev_file or ev_file.case_id != case.id:
+        raise HTTPException(404, "Evidence file not found")
+
+    # Protected forensic columns that can never be modified on original evidence
+    immutable_fields = {"sha256_hash", "filename", "original_name", "storage_path", "file_size_bytes", "source_device_hash", "acquisition_tool", "acquisition_timestamp"}
+    attempted_immutable = immutable_fields.intersection(body.keys())
+    if attempted_immutable and (ev_file.original_immutable or ev_file.version_status == "original"):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Original evidence is immutable. Cannot modify protected forensic fields: {', '.join(sorted(attempted_immutable))}. Create an analysis variant instead.",
+        )
+
+    # Allowed mutable fields (e.g. officer_notes, retention_class)
+    if "officer_notes" in body:
+        ev_file.officer_notes = str(body["officer_notes"])
+    if "retention_class" in body:
+        ev_file.retention_class = str(body["retention_class"])
+
+    from utils.audit import append_audit
+    await append_audit(
+        db,
+        action="EVIDENCE_METADATA_UPDATED",
+        resource_type="evidence_file",
+        resource_id=str(ev_file.id),
+        details={"case_id": str(case.id), "updated_fields": list(body.keys())},
+        user_id=str(current.id),
+    )
+    await db.commit()
+    return {"status": "ok", "evidence_id": str(ev_file.id), "message": "Metadata updated."}
+
+
+@router.post("/{case_id}/files/{evidence_id}/derivatives")
+async def create_evidence_derivative(
+    case_id: str,
+    evidence_id: str,
+    body: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """
+    Create a modifiable/recomputable analysis derivative from an immutable parent.
+    """
+    case = await require_case_access(db, current, case_id, write=True)
+    try:
+        ev_uuid = uuid.UUID(str(evidence_id))
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid evidence UUID")
+
+    parent = await db.get(EvidenceFile, ev_uuid)
+    if not parent or parent.case_id != case.id:
+        raise HTTPException(404, "Parent evidence not found")
+
+    derivative_name = body.get("name") or f"{parent.original_name}_derivative"
+    deriv_hash = hashlib.sha256(f"derivative:{parent.sha256_hash}:{uuid.uuid4().hex}".encode()).hexdigest()
+    deriv_file = EvidenceFile(
+        case_id=case.id,
+        parent_evidence_id=parent.id,
+        filename=derivative_name,
+        original_name=derivative_name,
+        file_type=parent.file_type,
+        source_type="ANALYSIS_DERIVATIVE",
+        sha256_hash=deriv_hash,
+        storage_path=f"derivatives/{case.id}/{deriv_hash}.bin",
+        upload_status="processed",
+        integrity_status="verified",
+        original_immutable=False,
+        version_status="variant",
+        version_number=parent.version_number + 1,
+        variant_details=body.get("details", {}),
+        uploaded_by=current.id,
+    )
+    db.add(deriv_file)
+    from utils.audit import append_audit
+    await append_audit(
+        db,
+        action="EVIDENCE_DERIVATIVE_CREATED",
+        resource_type="evidence_file",
+        resource_id=str(deriv_file.id),
+        details={"parent_id": str(parent.id), "derivative_name": derivative_name},
+        user_id=str(current.id),
+    )
+    await db.commit()
+    await db.refresh(deriv_file)
+    return {
+        "status": "ok",
+        "derivative_id": str(deriv_file.id),
+        "parent_evidence_id": str(parent.id),
+        "version_status": deriv_file.version_status,
+    }
+
 
 
 @router.post("/{case_id}/{evidence_id}/retry")

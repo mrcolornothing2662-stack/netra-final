@@ -24,7 +24,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
-from db.models import User
+from db.models import User, UserSession
 from db.session import get_db
 from utils.audit import append_audit
 
@@ -176,11 +176,20 @@ def _verify_password(plain: str, hashed: str) -> tuple[bool, bool]:
     return False, False
 
 
-def _create_access_token(user_id: str, role: str, must_change_password: bool = False) -> tuple[str, int, str]:
+def _create_access_token(
+    user_id: str,
+    role: str,
+    must_change_password: bool = False,
+    session_id: Optional[str] = None,
+    device_id: Optional[str] = None,
+    authentication_level: str = "standard",
+) -> tuple[str, int, str]:
     expire_delta = timedelta(minutes=settings.access_token_expire_minutes)
     expire = datetime.now(timezone.utc) + expire_delta
     expire_in = int(expire_delta.total_seconds())
     jti = uuid.uuid4().hex
+    sid = session_id or jti
+    did = device_id or "device-default"
     payload = {
         "sub": user_id,
         "role": role,
@@ -188,6 +197,9 @@ def _create_access_token(user_id: str, role: str, must_change_password: bool = F
         "jti": jti,
         "type": "access",
         "must_change_password": must_change_password,
+        "sid": sid,
+        "did": did,
+        "lvl": authentication_level,
     }
     token = jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
     return token, expire_in, jti
@@ -276,12 +288,29 @@ async def get_current_user(
         if not user_id or token_type != "access" or not jti:
             raise cred_exc
 
-        if await _is_jti_revoked(jti):
+        sid = payload.get("sid")
+        did = payload.get("did") or "device-default"
+        lvl = payload.get("lvl") or "standard"
+
+        if await _is_jti_revoked(jti) or (sid and await _is_jti_revoked(sid)):
             raise cred_exc
 
         uuid_obj = uuid.UUID(user_id)
     except (JWTError, ValueError, TypeError):
         raise cred_exc
+
+    # Check database session revocation if sid exists
+    if sid:
+        sess_res = await db.execute(select(UserSession).where(UserSession.id == sid))
+        active_sess = sess_res.scalar_one_or_none()
+        if active_sess and active_sess.revoked:
+            raise cred_exc
+        if active_sess:
+            active_sess.last_seen = datetime.now(timezone.utc)
+
+    request.state.session_id = sid
+    request.state.device_id = did
+    request.state.auth_level = lvl
 
     result = await db.execute(select(User).where(User.id == uuid_obj))
     user = result.scalar_one_or_none()
@@ -333,7 +362,17 @@ async def get_current_user_token_or_header(
 
 def require_role(*roles: str):
     async def _check(current: User = Depends(get_current_user)):
-        if current.role not in roles:
+        allowed = {r.strip().lower() for r in roles} | {r.strip().upper() for r in roles}
+        # Transparent mapping between canonical and legacy roles
+        if "investigator" in allowed or "INVESTIGATOR" in allowed:
+            allowed.update({"io", "fiu_analyst"})
+        if "manager" in allowed or "MANAGER" in allowed:
+            allowed.update({"supervisor"})
+        if "io" in allowed or "fiu_analyst" in allowed:
+            allowed.update({"investigator", "INVESTIGATOR"})
+        if "supervisor" in allowed:
+            allowed.update({"manager", "MANAGER"})
+        if current.role not in allowed:
             raise HTTPException(status_code=403, detail="Insufficient permissions for role")
         return current
     return _check
@@ -437,9 +476,28 @@ async def login(
             mfa_pending_token=pending_token,
         )
 
-    # 5. Issue standard access + refresh tokens
+    # 5. Issue standard access + refresh tokens bound to device session
+    dev_id = request.headers.get("X-Device-ID") or f"dev-{uuid.uuid4().hex[:12]}"
+    session_id = uuid.uuid4().hex
+
+    new_session = UserSession(
+        id=session_id,
+        user_id=user.id,
+        device_id=dev_id,
+        expires_at=now + timedelta(days=settings.refresh_token_expire_days),
+        authentication_level="standard",
+        ip_address=client_ip,
+        user_agent=request.headers.get("user-agent", "")[:250],
+    )
+    db.add(new_session)
+
     access_token, expires_in, _ = _create_access_token(
-        str(user.id), user.role, must_change_password=user.must_change_password
+        str(user.id),
+        user.role,
+        must_change_password=user.must_change_password,
+        session_id=session_id,
+        device_id=dev_id,
+        authentication_level="standard",
     )
     refresh_token, _ = await _create_refresh_token(str(user.id))
 
@@ -449,7 +507,7 @@ async def login(
         user_id=user.id,
         resource_type="user",
         resource_id=str(user.id),
-        details={"ip": client_ip, "mfa_verified": False},
+        details={"ip": client_ip, "device_id": dev_id, "session_id": session_id, "mfa_verified": False},
     )
     await db.commit()
 
@@ -714,3 +772,136 @@ async def totp_disable(
     )
     await db.commit()
     return {"status": "ok", "message": "TOTP Multi-Factor Authentication disabled."}
+
+
+# ── Milestone 9: Device & Session Trust Endpoints ────────────────────────────
+
+class SessionRevokeRequest(BaseModel):
+    session_id: Optional[str] = None
+    reason: Optional[str] = "User requested signout"
+
+
+class SessionElevateRequest(BaseModel):
+    password: str
+    target_level: str = "elevated"  # "elevated" | "supervisor"
+
+
+@router.get("/sessions")
+async def list_active_sessions(
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """List active device sessions for current authenticated user."""
+    res = await db.execute(
+        select(UserSession)
+        .where(UserSession.user_id == current.id)
+        .order_by(UserSession.last_seen.desc())
+    )
+    sessions = res.scalars().all()
+    return [
+        {
+            "session_id": s.id,
+            "device_id": s.device_id,
+            "issued_at": s.issued_at.isoformat() if s.issued_at else None,
+            "expires_at": s.expires_at.isoformat() if s.expires_at else None,
+            "last_seen": s.last_seen.isoformat() if s.last_seen else None,
+            "authentication_level": s.authentication_level,
+            "revoked": s.revoked,
+            "ip_address": s.ip_address,
+            "user_agent": s.user_agent,
+        }
+        for s in sessions
+    ]
+
+
+@router.post("/sessions/revoke")
+async def revoke_session(
+    body: Optional[SessionRevokeRequest] = None,
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """Revoke an active session. If no session_id is provided, revokes current session."""
+    target_sid = (body.session_id if body and body.session_id else None) or getattr(request.state, "session_id", None)
+    if not target_sid:
+        raise HTTPException(status_code=400, detail="No session identified to revoke")
+
+    res = await db.execute(select(UserSession).where(UserSession.id == target_sid))
+    sess = res.scalar_one_or_none()
+    if sess:
+        if sess.user_id != current.id and current.role.lower() != "admin":
+            raise HTTPException(status_code=403, detail="Cannot revoke another user's session")
+        sess.revoked = True
+        sess.revoked_reason = (body.reason if body else None) or "Revoked"
+
+    # Invalidate in-memory/redis cache
+    await _revoke_jti(target_sid, 86400 * 7)
+
+    await append_audit(
+        db,
+        action="SESSION_REVOKED",
+        user_id=current.id,
+        resource_type="user_session",
+        resource_id=target_sid,
+        details={"reason": (body.reason if body else None) or "User signout"},
+    )
+    await db.commit()
+    return {"status": "ok", "message": f"Session '{target_sid}' successfully revoked."}
+
+
+@router.post("/sessions/elevate", response_model=Token)
+async def elevate_session(
+    body: SessionElevateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """
+    Step-up authentication: Re-verifies credentials to elevate session trust level
+    to 'elevated' or 'supervisor' for sensitive operations.
+    """
+    valid, _ = _verify_password(body.password, current.hashed_password)
+    if not valid:
+        raise HTTPException(status_code=401, detail="Invalid password for session elevation")
+
+    sid = getattr(request.state, "session_id", None) or uuid.uuid4().hex
+    did = getattr(request.state, "device_id", None) or "device-default"
+
+    target_lvl = body.target_level.strip().lower()
+    if target_lvl not in ("elevated", "supervisor"):
+        target_lvl = "elevated"
+
+    # Only supervisor/manager or admin can obtain supervisor trust level
+    if target_lvl == "supervisor" and current.role.lower() not in ("manager", "supervisor", "admin"):
+        raise HTTPException(status_code=403, detail="Supervisor authentication level requires Manager or Admin role")
+
+    sess_res = await db.execute(select(UserSession).where(UserSession.id == sid))
+    active_sess = sess_res.scalar_one_or_none()
+    if active_sess:
+        active_sess.authentication_level = target_lvl
+
+    token, expires_in, _ = _create_access_token(
+        str(current.id),
+        current.role,
+        session_id=sid,
+        device_id=did,
+        authentication_level=target_lvl,
+    )
+
+    await append_audit(
+        db,
+        action="SESSION_ELEVATED",
+        user_id=current.id,
+        resource_type="user_session",
+        resource_id=sid,
+        details={"new_level": target_lvl, "device_id": did},
+    )
+    await db.commit()
+
+    return Token(
+        access_token=token,
+        expires_in=expires_in,
+        role=current.role,
+        full_name=current.full_name,
+        mfa_required=False,
+    )

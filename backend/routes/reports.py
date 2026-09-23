@@ -6,18 +6,40 @@ and Section 193 BNSS forensic court dossiers.
 """
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Case, CaseCollaborator, DossierExportApproval, EvidenceFile, User
+from db.models import (
+    Case,
+    CaseCollaborator,
+    DossierExportApproval,
+    Entity,
+    EvidenceFile,
+    InvestigationFinding,
+    Relationship,
+    ReportSnapshot,
+    User,
+)
 from db.session import get_db
 from routes.auth import get_current_user, require_role
 from routes.case_access import require_case_access
 from utils.audit import append_audit
+from report.contracts import (
+    EvidenceUsageClaim,
+    EvidenceUsageFinding,
+    EvidenceUsageRelationship,
+    EvidenceUsageResponse,
+    ReportGenerateRequest,
+    ReportPayload,
+    ReportReviewBody,
+    ReportType,
+)
+from report.builder import ReportBuilder
+from report.renderer import ReportRenderer
 
 router = APIRouter(prefix="/cases/{case_id}/reports", tags=["Reports & Export Approvals"])
 
@@ -294,3 +316,479 @@ async def export_certified_dossier(
         },
         "evidence_manifest": evidence_table,
     }
+
+
+# ── Milestone 8: Evidence-Linked Report Snapshots & Workflow ─────────────────
+
+@router.post("/generate", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED)
+async def generate_case_report(
+    case_id: str,
+    body: ReportGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """
+    Generate an immutable, reproducible report snapshot (Brief or Formal Dossier).
+    Computes deterministic content hash, verifies claim provenance, and preserves
+    exact case state version without mutating case domain tables.
+    """
+    from investigation.policies import user_has_capability, CAP_REPORT_GENERATE
+    if not user_has_capability(current.role, CAP_REPORT_GENERATE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions: REPORT_GENERATE capability required",
+        )
+
+    case = await require_case_access(db, current, case_id)
+
+    payload = await ReportBuilder.build_report(
+        case_id=str(case.id),
+        db=db,
+        report_type=body.report_type,
+        user_id=str(current.id),
+        title=body.title,
+        section_keys=body.section_keys,
+    )
+
+    meta = payload.metadata
+    snapshot = ReportSnapshot(
+        id=uuid.UUID(meta.report_id),
+        case_id=case.id,
+        report_type=meta.report_type.value,
+        status=meta.status.value,
+        case_state_version=meta.case_state_version,
+        template_version=meta.template_version,
+        content_hash=meta.content_hash,
+        title=meta.title,
+        summary=meta.summary,
+        claims_count=meta.claims_count,
+        linked_claims_count=meta.linked_claims_count,
+        review_required_claims_count=meta.review_required_claims_count,
+        payload=payload.model_dump(),
+        generated_by=current.id,
+    )
+    db.add(snapshot)
+    await db.flush()
+
+    await append_audit(
+        db,
+        action="REPORT_SNAPSHOT_GENERATED",
+        resource_type="report_snapshot",
+        resource_id=str(snapshot.id),
+        details={
+            "case_id": str(case.id),
+            "report_type": meta.report_type.value,
+            "case_state_version": meta.case_state_version,
+            "content_hash": meta.content_hash,
+            "claims_count": meta.claims_count,
+            "linked_claims_count": meta.linked_claims_count,
+            "review_required_claims_count": meta.review_required_claims_count,
+        },
+        user_id=str(current.id),
+    )
+
+    return payload.model_dump()
+
+
+@router.get("/snapshots")
+async def list_report_snapshots(
+    case_id: str,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """
+    List all immutable report snapshots created for this case.
+    """
+    case = await require_case_access(db, current, case_id)
+    res = await db.execute(
+        select(ReportSnapshot)
+        .where(ReportSnapshot.case_id == case.id)
+        .order_by(desc(ReportSnapshot.generated_at))
+    )
+    snapshots = res.scalars().all()
+    return [
+        {
+            "id": str(s.id),
+            "case_id": str(s.case_id),
+            "report_type": s.report_type,
+            "status": s.status,
+            "case_state_version": s.case_state_version,
+            "template_version": s.template_version,
+            "content_hash": s.content_hash,
+            "title": s.title,
+            "summary": s.summary,
+            "claims_count": s.claims_count,
+            "linked_claims_count": s.linked_claims_count,
+            "review_required_claims_count": s.review_required_claims_count,
+            "generated_by": str(s.generated_by) if s.generated_by else None,
+            "generated_at": s.generated_at.isoformat() if s.generated_at else None,
+            "approved_by": str(s.approved_by) if s.approved_by else None,
+            "approved_at": s.approved_at.isoformat() if s.approved_at else None,
+            "rejection_reason": s.rejection_reason,
+        }
+        for s in snapshots
+    ]
+
+
+@router.get("/snapshots/{snapshot_id}")
+async def get_report_snapshot(
+    case_id: str,
+    snapshot_id: str,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """
+    Retrieve an exact, frozen report snapshot.
+    Historical Guarantee: Returns the immutable snapshot as generated at case_state_version,
+    never silently recomputing against newer mutations.
+    """
+    case = await require_case_access(db, current, case_id)
+    try:
+        snap_uuid = uuid.UUID(str(snapshot_id))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid snapshot UUID format")
+
+    res = await db.execute(
+        select(ReportSnapshot).where(
+            ReportSnapshot.id == snap_uuid,
+            ReportSnapshot.case_id == case.id,
+        )
+    )
+    snapshot = res.scalar_one_or_none()
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Report snapshot not found")
+
+    return snapshot.payload
+
+
+@router.post("/snapshots/{snapshot_id}/submit-review")
+async def submit_snapshot_for_review(
+    case_id: str,
+    snapshot_id: str,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """
+    Submit a DRAFT report snapshot for supervisor / four-eyes review.
+    """
+    from investigation.policies import user_has_capability, CAP_REPORT_GENERATE
+    if not user_has_capability(current.role, CAP_REPORT_GENERATE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions: REPORT_GENERATE capability required",
+        )
+
+    case = await require_case_access(db, current, case_id, write=True)
+    try:
+        snap_uuid = uuid.UUID(str(snapshot_id))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid snapshot UUID format")
+
+    res = await db.execute(
+        select(ReportSnapshot).where(
+            ReportSnapshot.id == snap_uuid,
+            ReportSnapshot.case_id == case.id,
+        )
+    )
+    snapshot = res.scalar_one_or_none()
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Report snapshot not found")
+
+    if snapshot.status not in ("DRAFT", "REJECTED"):
+        raise HTTPException(status_code=400, detail=f"Cannot submit snapshot with status '{snapshot.status}' for review")
+
+    snapshot.status = "REVIEW"
+    if isinstance(snapshot.payload, dict) and "metadata" in snapshot.payload:
+        snapshot.payload["metadata"]["status"] = "REVIEW"
+
+    await append_audit(
+        db,
+        action="REPORT_SNAPSHOT_SUBMITTED_FOR_REVIEW",
+        resource_type="report_snapshot",
+        resource_id=str(snapshot.id),
+        details={"case_id": str(case.id), "report_type": snapshot.report_type},
+        user_id=str(current.id),
+    )
+    return {"status": "success", "snapshot_id": str(snapshot.id), "new_status": "REVIEW"}
+
+
+@router.post("/snapshots/{snapshot_id}/review")
+async def review_report_snapshot(
+    case_id: str,
+    snapshot_id: str,
+    body: ReportReviewBody,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """
+    Four-Eyes review of a report snapshot.
+    Strict Policy: An officer cannot approve their own report snapshot.
+    """
+    case = await require_case_access(db, current, case_id, write=True)
+    try:
+        snap_uuid = uuid.UUID(str(snapshot_id))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid snapshot UUID format")
+
+    res = await db.execute(
+        select(ReportSnapshot).where(
+            ReportSnapshot.id == snap_uuid,
+            ReportSnapshot.case_id == case.id,
+        )
+    )
+    snapshot = res.scalar_one_or_none()
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Report snapshot not found")
+
+    if snapshot.status != "REVIEW":
+        raise HTTPException(status_code=400, detail=f"Cannot review snapshot with status '{snapshot.status}'. Must be in 'REVIEW' status.")
+
+    # FOUR-EYES PRINCIPLE: An officer cannot approve their own report
+    if snapshot.generated_by == current.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Four-Eyes Policy Violation: You cannot approve your own report. A second officer or supervisor must review it.",
+        )
+
+    from investigation.policies import user_has_capability, CAP_REPORT_APPROVE
+    if not user_has_capability(current.role, CAP_REPORT_APPROVE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions: REPORT_APPROVE capability required",
+        )
+
+    action_norm = body.action.strip().upper()
+    if action_norm not in ("APPROVE", "REJECT"):
+        raise HTTPException(status_code=400, detail="Action must be 'APPROVE' or 'REJECT'")
+
+    if action_norm == "REJECT" and not body.rejection_reason:
+        raise HTTPException(status_code=400, detail="A rejection reason must be provided when rejecting a report snapshot")
+
+    now = datetime.now(timezone.utc)
+    if action_norm == "APPROVE":
+        snapshot.status = "APPROVED"
+        snapshot.approved_by = current.id
+        snapshot.approved_at = now
+        snapshot.rejection_reason = None
+    else:
+        snapshot.status = "REJECTED"
+        snapshot.rejection_reason = body.rejection_reason
+
+    if isinstance(snapshot.payload, dict) and "metadata" in snapshot.payload:
+        snapshot.payload["metadata"]["status"] = snapshot.status
+        snapshot.payload["metadata"]["approved_by"] = str(current.id) if action_norm == "APPROVE" else None
+        snapshot.payload["metadata"]["approved_at"] = now.isoformat() if action_norm == "APPROVE" else None
+        snapshot.payload["metadata"]["rejection_reason"] = snapshot.rejection_reason
+
+    await append_audit(
+        db,
+        action=f"REPORT_SNAPSHOT_{snapshot.status}",
+        resource_type="report_snapshot",
+        resource_id=str(snapshot.id),
+        details={
+            "case_id": str(case.id),
+            "report_type": snapshot.report_type,
+            "status": snapshot.status,
+            "reviewer_rank": current.rank,
+            "rejection_reason": snapshot.rejection_reason,
+        },
+        user_id=str(current.id),
+    )
+
+    return {
+        "status": "success",
+        "snapshot_id": str(snapshot.id),
+        "new_status": snapshot.status,
+        "approved_by": str(snapshot.approved_by) if snapshot.approved_by else None,
+        "approved_at": snapshot.approved_at.isoformat() if snapshot.approved_at else None,
+    }
+
+
+@router.post("/snapshots/{snapshot_id}/export")
+async def export_report_snapshot(
+    case_id: str,
+    snapshot_id: str,
+    export_format: str = Query("json", description="'json', 'markdown', 'html', or 'pdf'"),
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """
+    Controlled export of a report snapshot.
+    Formal Dossier strictly requires 'APPROVED' status.
+    """
+    case = await require_case_access(db, current, case_id)
+    try:
+        snap_uuid = uuid.UUID(str(snapshot_id))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid snapshot UUID format")
+
+    res = await db.execute(
+        select(ReportSnapshot).where(
+            ReportSnapshot.id == snap_uuid,
+            ReportSnapshot.case_id == case.id,
+        )
+    )
+    snapshot = res.scalar_one_or_none()
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Report snapshot not found")
+
+    # Authorize export: Formal dossier requires APPROVED status
+    if snapshot.report_type == "formal_dossier" and snapshot.status not in ("APPROVED", "EXPORTED"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Dual-authorization required: Exporting a formal dossier requires 'APPROVED' status. Current status is '{snapshot.status}'.",
+        )
+
+    from investigation.policies import user_has_capability, CAP_REPORT_EXPORT
+    if not user_has_capability(current.role, CAP_REPORT_EXPORT):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions: REPORT_EXPORT capability required",
+        )
+
+    payload = ReportPayload.model_validate(snapshot.payload)
+    snapshot.status = "EXPORTED"
+
+    await append_audit(
+        db,
+        action="REPORT_SNAPSHOT_EXPORTED",
+        resource_type="report_snapshot",
+        resource_id=str(snapshot.id),
+        details={
+            "case_id": str(case.id),
+            "report_type": snapshot.report_type,
+            "export_format": export_format,
+            "content_hash": snapshot.content_hash,
+        },
+        user_id=str(current.id),
+    )
+
+    fmt = export_format.strip().lower()
+    if fmt == "markdown":
+        from fastapi.responses import PlainTextResponse
+        md_text = ReportRenderer.to_markdown(payload)
+        return PlainTextResponse(md_text, media_type="text/markdown")
+    elif fmt == "html":
+        from fastapi.responses import HTMLResponse
+        html_text = ReportRenderer.to_html(payload)
+        return HTMLResponse(html_text)
+    elif fmt == "pdf":
+        from fastapi.responses import FileResponse
+        pdf_path = await ReportRenderer.render_pdf(payload)
+        media_type = "application/pdf" if str(pdf_path).endswith(".pdf") else "text/html"
+        return FileResponse(pdf_path, media_type=media_type, filename=f"Dossier_{case.case_number}.pdf")
+    else:
+        payload_dict = snapshot.payload if isinstance(snapshot.payload, dict) else {}
+        meta = dict(payload_dict.get("metadata") or {})
+        meta["status"] = snapshot.status
+        meta["exported_by"] = str(current.id)
+        meta["exported_at"] = datetime.now(timezone.utc).isoformat()
+        return {**payload_dict, "status": snapshot.status, "metadata": meta}
+
+
+@router.get("/evidence/{evidence_id}/usage", response_model=EvidenceUsageResponse)
+async def get_evidence_usage(
+    case_id: str,
+    evidence_id: str,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """
+    Bidirectional Evidence / Report Link:
+    Given an evidence item, returns every finding, relationship, and report claim
+    grounded in this evidence bitstream.
+    """
+    case = await require_case_access(db, current, case_id)
+    try:
+        ev_uuid = uuid.UUID(str(evidence_id))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid evidence UUID format")
+
+    ef_res = await db.execute(
+        select(EvidenceFile).where(EvidenceFile.id == ev_uuid, EvidenceFile.case_id == case.id)
+    )
+    ef = ef_res.scalar_one_or_none()
+    if not ef:
+        raise HTTPException(status_code=404, detail="Evidence file not found in case.")
+
+    # 1. Findings using this evidence
+    findings_res = await db.execute(
+        select(InvestigationFinding).where(InvestigationFinding.case_id == case.id)
+    )
+    findings = findings_res.scalars().all()
+    ev_str = str(ev_uuid)
+    matched_findings = []
+    for f in findings:
+        refs = getattr(f, "evidence_refs", []) or []
+        ref_ids = [r if isinstance(r, str) else str(r.get("id")) for r in refs if r]
+        if ev_str in ref_ids:
+            matched_findings.append(
+                EvidenceUsageFinding(
+                    id=str(f.id),
+                    title=f.title,
+                    severity=getattr(f, "severity", "MEDIUM"),
+                    freshness_status=getattr(f, "freshness_status", "CURRENT"),
+                )
+            )
+
+    # 2. Relationships using this evidence
+    rel_res = await db.execute(
+        select(Relationship).where(Relationship.case_id == case.id)
+    )
+    relationships = rel_res.scalars().all()
+    ent_res = await db.execute(select(Entity).where(Entity.case_id == case.id))
+    ents = {str(e.id): e.canonical_value for e in ent_res.scalars().all()}
+
+    matched_relationships = []
+    for r in relationships:
+        refs = getattr(r, "evidence_refs", []) or []
+        ref_ids = [ref if isinstance(ref, str) else str(ref.get("id")) for ref in refs if ref]
+        if ev_str in ref_ids:
+            s_id = str(getattr(r, "source_entity_id", getattr(r, "source_id", "")))
+            t_id = str(getattr(r, "target_entity_id", getattr(r, "target_id", "")))
+            r_type = getattr(r, "relationship_type", getattr(r, "rel_type", "RELATED_TO"))
+            r_stat = getattr(r, "verification_status", getattr(r, "status", "ACTIVE"))
+            matched_relationships.append(
+                EvidenceUsageRelationship(
+                    id=str(r.id),
+                    rel_type=r_type,
+                    source_name=ents.get(s_id, "Unknown"),
+                    target_name=ents.get(t_id, "Unknown"),
+                    status=r_stat,
+                )
+            )
+
+    # 3. Claims using this evidence across report snapshots
+    snaps_res = await db.execute(
+        select(ReportSnapshot).where(ReportSnapshot.case_id == case.id)
+    )
+    snapshots = snaps_res.scalars().all()
+    matched_claims = []
+    for s in snapshots:
+        payload = s.payload or {}
+        for sec in payload.get("sections", []):
+            for c in sec.get("claims", []):
+                for e_ref in c.get("evidence_refs", []):
+                    if e_ref.get("evidence_id") == ev_str:
+                        matched_claims.append(
+                            EvidenceUsageClaim(
+                                claim_id=c.get("claim_id", "CLAIM"),
+                                text=c.get("text", "")[:120],
+                                report_type=s.report_type,
+                                report_id=str(s.id),
+                            )
+                        )
+                        break
+
+    return EvidenceUsageResponse(
+        evidence_id=ev_str,
+        case_id=str(case.id),
+        filename=getattr(ef, "original_name", None) or getattr(ef, "filename", "artifact"),
+        sha256_hash=getattr(ef, "sha256_hash", "") or "",
+        file_size_bytes=getattr(ef, "file_size_bytes", None),
+        upload_status=getattr(ef, "upload_status", "CONFIRMED"),
+        findings=matched_findings,
+        claims=matched_claims,
+        relationships=matched_relationships,
+        total_usages=len(matched_findings) + len(matched_claims) + len(matched_relationships),
+    )

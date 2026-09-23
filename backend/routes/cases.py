@@ -58,6 +58,7 @@ class CaseOut(BaseModel):
     status:         str
     assigned_officer_id: str | None
     tags:           list[str] | None
+    state_version:  int = 1
     created_at:     str
     updated_at:     str
 
@@ -75,6 +76,7 @@ class CaseOut(BaseModel):
             status=c.status,
             assigned_officer_id=str(c.assigned_officer_id) if c.assigned_officer_id else None,
             tags=c.tags or [],
+            state_version=c.state_version or 1,
             created_at=c.created_at.isoformat() if c.created_at else "",
             updated_at=c.updated_at.isoformat() if c.updated_at else "",
         )
@@ -384,3 +386,17 @@ async def remove_case_collaborator(
         "collaborator_id": str(target_uuid),
     })
     return {"status": "success", "message": "Collaborator removed successfully"}
+
+
+@router.get("/{case_id}/evidence/{evidence_id}/usage")
+async def get_case_evidence_usage(
+    case_id: str,
+    evidence_id: str,
+    db: AsyncSession = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """
+    Bidirectional Evidence Usage: returns findings, relationships, and report claims citing this evidence.
+    """
+    from routes.reports import get_evidence_usage
+    return await get_evidence_usage(case_id=case_id, evidence_id=evidence_id, db=db, current=current)

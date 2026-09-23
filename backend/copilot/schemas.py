@@ -321,6 +321,7 @@ class VerifiedResponse(BaseModel):
     grounded_claim_ratio: float
     report: VerificationReport
     case_id: str
+    mutation_proposals: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -385,3 +386,4 @@ class CopilotResponse(BaseModel):
     warning: Optional[str] = None
     verification: Optional[Dict[str, Any]] = None
     query_plan: Optional[Dict[str, Any]] = None
+    mutation_proposals: List[Dict[str, Any]] = Field(default_factory=list)
