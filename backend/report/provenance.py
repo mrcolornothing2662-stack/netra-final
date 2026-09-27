@@ -151,7 +151,15 @@ class ProvenanceResolver:
         trace_steps: List[str] = []
         collected_citations: List[EvidenceCitation] = []
         if explicit_citations:
-            collected_citations.extend(explicit_citations)
+            for ec in explicit_citations:
+                ef = self.evidence_files_by_id.get(str(ec.evidence_id))
+                if ef is None:
+                    warnings.append(f"Explicit citation references nonexistent evidence {ec.evidence_id}")
+                else:
+                    real_hash = getattr(ef, "sha256_hash", "")
+                    if ec.sha256_hash and real_hash and ec.sha256_hash != real_hash:
+                        warnings.append(f"Hash substitution detected on evidence {ec.evidence_id}: cited {ec.sha256_hash[:8]} != stored {real_hash[:8]}")
+                collected_citations.append(ec)
 
         entity_refs_summary: List[Dict[str, Any]] = []
         event_refs_summary: List[Dict[str, Any]] = []
@@ -178,6 +186,10 @@ class ProvenanceResolver:
                     "canonical_provenance": scores.get("canonical_provenance"),
                 }
                 trace_steps.append(f"Finding F-{finding.title[:24]}")
+                # Phase 5 Adversarial Defense: Finding with REVIEW_REQUIRED status cannot yield a VERIFIED claim
+                f_prov_status = scores.get("provenance_status")
+                if f_prov_status == "REVIEW_REQUIRED":
+                    warnings.append(f"Underlying finding {finding_id} has unverified provenance (REVIEW_REQUIRED); cannot yield verified claim.")
                 # Pull finding's evidence refs
                 for ref in (getattr(finding, "evidence_refs", []) or []):
                     if isinstance(ref, str):
@@ -295,7 +307,14 @@ class ProvenanceResolver:
 
         # 6. Provenance Status Determination
         has_citations = len(collected_citations) > 0
-        has_invalid_refs = any("Nonexistent evidence" in w or "lacks a valid SHA-256" in w for w in warnings)
+        has_invalid_refs = any(
+            "Nonexistent evidence" in w
+            or "lacks a valid SHA-256" in w
+            or "Hash substitution" in w
+            or "REVIEW_REQUIRED" in w
+            or "REJECTED" in w
+            for w in warnings
+        )
 
         if not has_citations:
             provenance_status = ProvenanceStatus.UNLINKED

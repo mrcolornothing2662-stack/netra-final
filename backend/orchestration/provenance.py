@@ -332,6 +332,7 @@ def reconstruct_chain_lineage(
     event: Optional[Any] = None,
     evidence_file: Optional[Any] = None,
     epistemic_override: Optional[EpistemicStatus] = None,
+    claimed_sha256: Optional[str] = None,
 ) -> ChainLineageTrace:
     """
     Phase 4: End-to-End Lineage Reconstruction & Invariant Verification.
@@ -387,6 +388,16 @@ def reconstruct_chain_lineage(
             is_complete = False
             warnings.append(f"EvidenceEvent {ev_id} points to evidence {ev_ef_id}, but root is {getattr(evidence_file, 'id', None)}.")
 
+        # Phase 5 Tamper Detection: Event-level Hash Substitution Check
+        ev_meta = getattr(event, "event_metadata", {}) or {}
+        ev_prov = ev_meta.get("canonical_provenance") or {}
+        if ev_prov:
+            ev_hashes = ev_prov.get("sha256_digests") or []
+            if ev_hashes and sha256 and sha256 not in ev_hashes:
+                is_complete = False
+                parent_anchored = False
+                warnings.append(f"Hash substitution detected on event {ev_id}: {ev_hashes} != {sha256}")
+
         ev_sha256 = root_digests[0] if root_digests else None
         links.append(EvidenceChainLink(
             tier=ChainTier.EVIDENCE_EVENT,
@@ -412,7 +423,15 @@ def reconstruct_chain_lineage(
         rel_prov = ProvenanceType.from_str(rel_ep)
         rel_event_refs = [str(x) for x in (getattr(relationship, "event_refs", []) or [])]
         
-        event_anchored = (event is not None) and (str(getattr(event, "id", "")) in rel_event_refs or len(rel_event_refs) == 0)
+        # Phase 5 Tamper Detection: Relationship Provenance Wiped/Missing Check
+        rel_attrs = getattr(relationship, "attributes", {}) or {}
+        rel_prov_meta = rel_attrs.get("canonical_provenance")
+        rel_prov_present = bool(rel_prov_meta)
+        if not rel_prov_present:
+            is_complete = False
+            warnings.append(f"Relationship {rel_id} lacks canonical provenance metadata.")
+
+        event_anchored = rel_prov_present and (event is not None) and (str(getattr(event, "id", "")) in rel_event_refs or len(rel_event_refs) == 0)
         links.append(EvidenceChainLink(
             tier=ChainTier.GRAPH_ELEMENT,
             identifier=rel_id,
@@ -458,6 +477,19 @@ def reconstruct_chain_lineage(
             is_complete = False
             warnings.append(f"Finding '{f_title}' has no verifiable reference to root evidence or events.")
 
+        # Phase 5 Tamper Detection: Cognitive Finding Forgery & Review Required
+        f_scores = getattr(finding, "component_scores", {}) or {}
+        f_prov = f_scores.get("canonical_provenance") or {}
+        f_prov_type = f_prov.get("provenance")
+        if f_engine and f_prov_type == "OBSERVED":
+            is_complete = False
+            finding_anchored = False
+            warnings.append(f"Provenance forgery detected: Engine-generated finding '{f_title}' falsely claims OBSERVED origin.")
+        if f_scores.get("provenance_status") == "REVIEW_REQUIRED":
+            is_complete = False
+            finding_anchored = False
+            warnings.append(f"Underlying finding '{f_title}' has unverified provenance (REVIEW_REQUIRED).")
+
         links.append(EvidenceChainLink(
             tier=ChainTier.FINDING,
             identifier=f_id,
@@ -472,6 +504,9 @@ def reconstruct_chain_lineage(
         ))
 
     # 5. Tier 4: Explicit Claim
+    if claimed_sha256 and root_digests and claimed_sha256 not in root_digests:
+        is_complete = False
+        warnings.append(f"Root digest mismatch: Claim cites hash {claimed_sha256[:8]}... but EvidenceFile has {root_digests[0][:8]}...")
     claim_ep = epistemic_override or (finding_ep if finding else EpistemicStatus.FACT)
     # Check negative guarantee: INFERRED finding must NEVER be silently promoted to empirical FACT
     if finding is not None and finding_ep in (EpistemicStatus.HYPOTHESIS, EpistemicStatus.DERIVED_ANALYSIS):
