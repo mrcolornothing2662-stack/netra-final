@@ -91,10 +91,13 @@ async def run_autonomous_investigation(
 
 async def _run_agent_background(agent, session_id: str):
     """Background task wrapper for agent.run()"""
+    from db.session import db_context
     try:
-        result = await agent.run()
-        status = (result or {}).get("status", getattr(agent, "status", "unknown"))
-        logger.info(f"[Agent] Session {session_id} state: {status}")
+        async with db_context() as session:
+            agent.db = session
+            result = await agent.run()
+            status = (result or {}).get("status", getattr(agent, "status", "unknown"))
+            logger.info(f"[Agent] Session {session_id} state: {status}")
     except Exception as exc:
         logger.error(f"[Agent] Session {session_id} error: {exc}")
 

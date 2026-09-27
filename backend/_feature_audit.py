@@ -313,7 +313,7 @@ async def run():
         if sess:
             for _ in range(20):
                 s = await client.get(f"{API}/agent/{case_id}/status?session_id={sess}", headers=io_h)
-                if s.status_code == 200 and s.json().get("status") in ("completed", "awaiting_approval", "failed", "error"):
+                if s.status_code == 200 and s.json().get("status") in ("completed", "awaiting_approval", "held_for_review", "failed", "error"):
                     break
                 await asyncio.sleep(0.5)
             check("agent: status reachable", s.status_code == 200, f"status={s.json().get('status') if s.status_code==200 else s.status_code}")
@@ -338,7 +338,7 @@ async def run():
               and isinstance(aj.get("last_hash"), str) and len(aj.get("last_hash",""))==64)
         r = await client.get(f"{API}/audit", headers=admin_h)
         check("audit: log listing", r.status_code == 200, f"HTTP {r.status_code}")
-        r = await client.get(f"{API}/audit/verify/{case_id}", headers=admin_h)
+        r = await client.get(f"{API}/audit/verify/{case_id}", headers=io_h)
         check("audit: per-case verify", r.status_code == 200, f"HTTP {r.status_code}")
 
         print(f"\nAudit case: {case_no} ({case_id})")
