@@ -17,6 +17,14 @@ import inspect
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Awaitable, Callable, Iterable, Sequence, Union
+from orchestration.provenance import (
+    CanonicalProvenanceRecord,
+    EpistemicStatus as CanonicalEpistemicStatus,
+    ProvenanceType,
+    ChainTier,
+    create_inferred_provenance,
+    create_observed_provenance,
+)
 
 
 # ── Finding vocabulary ────────────────────────────────────────────────────────
@@ -125,8 +133,21 @@ class NormalizedEvent:
             confidence=float(data.get("confidence", 1.0)),
         )
 
+    def to_provenance_record(self) -> CanonicalProvenanceRecord:
+        """Return the canonical OBSERVED provenance record for this event."""
+        return create_observed_provenance(
+            evidence_id=str(self.evidence_id) if self.evidence_id else "unknown_evidence",
+            event_id=str(self.event_id) if self.event_id else None,
+            method=self.extraction_method or "direct_event_extraction",
+        )
+
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        try:
+            d["canonical_provenance"] = self.to_provenance_record().to_dict()
+        except Exception:
+            pass
+        return d
 
 
 # ── CognitiveResult ───────────────────────────────────────────────────────────
@@ -193,9 +214,30 @@ class CognitiveResult:
             ])
         return hashlib.sha256(seed.encode("utf-8")).hexdigest()
 
+    def to_provenance_record(self) -> CanonicalProvenanceRecord:
+        """Return the canonical provenance record for this cognitive finding."""
+        prov_type = ProvenanceType.from_str(self.provenance)
+        epistemic = CanonicalEpistemicStatus.from_str(self.epistemic_status)
+        return CanonicalProvenanceRecord(
+            provenance=prov_type,
+            epistemic_status=epistemic,
+            evidence_refs=list(self.evidence_refs),
+            event_refs=list(self.event_refs),
+            entity_refs=list(self.entity_refs),
+            finding_refs=list(self.supporting_refs),
+            confidence=self.confidence,
+            generated_by=self.source_engine or "unknown_cognitive_engine",
+            method=f"{self.source_engine} v{self.engine_version}" if self.engine_version else self.source_engine,
+            epistemic_justification=self.reasoning if self.reasoning else None,
+        )
+
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["fingerprint"] = self.fingerprint()
+        try:
+            data["canonical_provenance"] = self.to_provenance_record().to_dict()
+        except Exception:
+            pass
         return data
 
 

@@ -111,6 +111,36 @@ class ReportClaim(BaseModel):
     def has_sufficient_provenance(self) -> bool:
         return self.provenance_status == ProvenanceStatus.VERIFIED and len(self.evidence_refs) > 0
 
+    def to_canonical_provenance(self):
+        from orchestration.provenance import (
+            CanonicalProvenanceRecord,
+            EpistemicStatus as CanonicalEpistemicStatus,
+            ProvenanceType,
+        )
+        ev_ids = [c.evidence_id for c in self.evidence_refs if c.evidence_id]
+        hashes = [c.sha256_hash for c in self.evidence_refs if c.sha256_hash]
+
+        if self.claim_type in ("evidence_inventory", "direct_observation") and len(ev_ids) > 0:
+            prov_type = ProvenanceType.OBSERVED
+            epistemic = CanonicalEpistemicStatus.FACT
+        else:
+            prov_type = ProvenanceType.INFERRED
+            raw_ep = self.epistemic_status.value if hasattr(self.epistemic_status, 'value') else str(self.epistemic_status)
+            epistemic = CanonicalEpistemicStatus.from_str(raw_ep)
+
+        return CanonicalProvenanceRecord(
+            provenance=prov_type,
+            epistemic_status=epistemic,
+            evidence_refs=ev_ids,
+            event_refs=list(self.event_refs),
+            entity_refs=list(self.entity_refs),
+            finding_refs=list(self.finding_refs),
+            claim_refs=[self.claim_id],
+            generated_by=self.generated_from or "report_builder",
+            sha256_digests=hashes,
+            method=self.claim_type,
+        )
+
 
 class ReportSection(BaseModel):
     """
