@@ -835,8 +835,19 @@ async def _process_evidence_file(evidence_file_id: str | uuid.UUID, file_path: s
             }
             detected_candidates: set[tuple[str, str]] = set()
 
+            from orchestration.provenance import create_observed_provenance
+
             for idx, evt in enumerate(events):
                 event_id = uuid.uuid4()
+                evt_meta = dict(evt.get("metadata") or {})
+                # Phase 3 Ingestion Provenance Enforcement: Stamp canonical OBSERVED provenance
+                evt_meta["canonical_provenance"] = create_observed_provenance(
+                    evidence_id=str(ev_file.id),
+                    event_id=str(event_id),
+                    sha256=ev_file.sha256_hash,
+                    method=f"parser:{detected_source_type or file_type}",
+                ).to_dict()
+
                 event = EvidenceEvent(
                     id=event_id,
                     case_id=ev_file.case_id,
@@ -846,7 +857,7 @@ async def _process_evidence_file(evidence_file_id: str | uuid.UUID, file_path: s
                     text_content=sanitize_db_val(evt.get("text")),
                     source_line=evt.get("source_line"),
                     source_page=evt.get("source_page"),
-                    event_metadata=sanitize_db_val(evt.get("metadata", {})),
+                    event_metadata=sanitize_db_val(evt_meta),
                 )
                 db.add(event)
 

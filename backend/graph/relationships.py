@@ -50,6 +50,34 @@ class RelationshipDraft:
     reason_codes: list = field(default_factory=list)
     observation_count: int = 1
 
+    def to_provenance_record(self):
+        """Emit canonical provenance record for this graph relationship draft."""
+        from orchestration.provenance import (
+            CanonicalProvenanceRecord,
+            EpistemicStatus as CanonicalEpistemicStatus,
+            ProvenanceType,
+        )
+        if self.epistemic_status == RT.OBSERVED:
+            prov_type = ProvenanceType.OBSERVED
+            ep_status = CanonicalEpistemicStatus.FACT
+        elif self.epistemic_status == RT.INVESTIGATOR_ADDED:
+            prov_type = ProvenanceType.USER_ASSERTED
+            ep_status = CanonicalEpistemicStatus.ALLEGED
+        else:
+            prov_type = ProvenanceType.INFERRED
+            ep_status = CanonicalEpistemicStatus.DERIVED_ANALYSIS
+
+        return CanonicalProvenanceRecord(
+            provenance=prov_type,
+            epistemic_status=ep_status,
+            evidence_refs=list(self.evidence_refs),
+            event_refs=list(self.event_refs),
+            confidence=self.confidence,
+            generated_by=self.source_engine or "graph_relationship_service",
+            method=f"graph_edge:{self.relationship_type}",
+            epistemic_justification=self.attributes.get("reason") if self.attributes else None,
+        )
+
 
 # ── Normalisation helpers ─────────────────────────────────────────────────────
 
@@ -637,6 +665,13 @@ async def materialize_observed_relationships(
 
         key = (source.id, target.id, draft.relationship_type, draft.epistemic_status)
         existing = rel_map.get(key)
+        # Phase 3 Graph Edge Provenance Enforcement
+        edge_attrs = dict(draft.attributes or {})
+        try:
+            edge_attrs["canonical_provenance"] = draft.to_provenance_record().to_dict()
+        except Exception:
+            pass
+
         if existing is None:
             row = Relationship(
                 case_id=case_id,
@@ -653,7 +688,7 @@ async def materialize_observed_relationships(
                 first_seen=draft.timestamp,
                 last_seen=draft.timestamp,
                 observation_count=draft.observation_count,
-                attributes=_sanitize(draft.attributes or {}),
+                attributes=_sanitize(edge_attrs),
                 evidence_refs=_merge_unique([], draft.evidence_refs),
                 event_refs=_merge_unique([], draft.event_refs),
                 source_engine=draft.source_engine,

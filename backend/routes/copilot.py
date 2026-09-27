@@ -197,7 +197,8 @@ async def copilot_endpoint(
                     "page": it.source_page or "",
                     "text": it.text,
                     "verified": True,
-                    "epistemic_status": it.epistemic_status or "OBSERVED",
+                    "provenance": "OBSERVED",
+                    "epistemic_status": it.epistemic_status or "FACT",
                 })
 
     # Separate observed vs inferred relationships/facts

@@ -90,6 +90,23 @@ async def upsert_finding(
             )
         )
 
+    # Phase 3 Provenance Enforcement ("No provenance, no intelligence")
+    try:
+        prov_record = result.to_provenance_record()
+        is_intact, prov_warnings = prov_record.validate_chain_integrity()
+    except Exception as exc:
+        prov_record = None
+        is_intact, prov_warnings = False, [f"Failed to generate canonical provenance: {exc}"]
+
+    enriched_scores = dict(result.component_scores or {})
+    if prov_record:
+        enriched_scores["canonical_provenance"] = prov_record.to_dict()
+    if not is_intact:
+        enriched_scores["provenance_status"] = "REVIEW_REQUIRED"
+        enriched_scores["provenance_warnings"] = prov_warnings
+    else:
+        enriched_scores["provenance_status"] = "VERIFIED"
+
     existing = (await _find()).scalar_one_or_none()
 
     if existing is None:
@@ -107,7 +124,7 @@ async def upsert_finding(
             entity_refs=list(result.entity_refs),
             event_refs=list(result.event_refs),
             evidence_refs=list(result.evidence_refs),
-            component_scores=dict(result.component_scores),
+            component_scores=enriched_scores,
             reason_codes=list(result.reason_codes),
             reasoning=result.reasoning,
             citations=list(result.citations),
@@ -154,7 +171,7 @@ async def upsert_finding(
     existing.generated_at_case_version = result.generated_at_case_version
     existing.freshness_status = result.freshness_status
 
-    new_scores: dict[str, Any] = dict(result.component_scores)
+    new_scores: dict[str, Any] = dict(enriched_scores)
     if materially_changed:
         # Preserve the actual prior state and append to a bounded history chain so
         # A→B→C remains recoverable (not merely B→C). The history entry is an

@@ -168,12 +168,14 @@ class ProvenanceResolver:
             fid_str = str(finding_id)
             finding = self.findings_by_id.get(fid_str)
             if finding:
+                scores = getattr(finding, "component_scores", {}) or {}
                 finding_ref_summary = {
                     "id": str(finding.id),
                     "title": finding.title,
                     "severity": getattr(finding, "severity", "MEDIUM"),
                     "freshness_status": getattr(finding, "freshness_status", "CURRENT"),
                     "fingerprint": getattr(finding, "fingerprint", None),
+                    "canonical_provenance": scores.get("canonical_provenance"),
                 }
                 trace_steps.append(f"Finding F-{finding.title[:24]}")
                 # Pull finding's evidence refs
@@ -207,6 +209,7 @@ class ProvenanceResolver:
                     epistemic_status = EpistemicStatus.CONTRADICTED
                     warnings.append(f"Relationship REL-{rid_str[:8]} was REJECTED by investigator adjudication.")
 
+                attrs = getattr(rel, "attributes", {}) or {}
                 relationship_ref_summary = {
                     "id": str(rel.id),
                     "rel_type": rel_type_val,
@@ -216,6 +219,7 @@ class ProvenanceResolver:
                     "target_value": getattr(target_ent, "canonical_value", "Unknown"),
                     "status": rel_status,
                     "confidence": getattr(rel, "confidence", 1.0),
+                    "canonical_provenance": attrs.get("canonical_provenance"),
                 }
                 trace_steps.append(f"Relationship {relationship_ref_summary['source_value']} --[{rel_type_val}]--> {relationship_ref_summary['target_value']}")
 
@@ -316,15 +320,15 @@ class ProvenanceResolver:
         )
 
         return ReportClaim(
-            claim_id=claim_id,
+            claim_id=str(claim_id),
             text=text,
             claim_type=claim_type,
             epistemic_status=epistemic_status,
             confidence_status=confidence_status,
-            entity_refs=list(all_entity_ids_to_check),
-            relationship_refs=[relationship_id] if relationship_id else [],
-            event_refs=list(all_event_ids_to_check),
-            finding_refs=[finding_id] if finding_id else [],
+            entity_refs=list(str(x) for x in all_entity_ids_to_check),
+            relationship_refs=[str(relationship_id)] if relationship_id else [],
+            event_refs=list(str(x) for x in all_event_ids_to_check),
+            finding_refs=[str(finding_id)] if finding_id else [],
             evidence_refs=collected_citations,
             limitations=limitations or [],
             generated_from=generated_from,
