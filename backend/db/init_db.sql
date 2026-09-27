@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
     rank        VARCHAR(64),
     unit        VARCHAR(128),
     role        VARCHAR(32) NOT NULL DEFAULT 'constable'
-                  CHECK (role IN ('constable','io','fiu_analyst','admin')),
+                  CHECK (role IN ('constable','io','fiu_analyst','admin','supervisor','INVESTIGATOR','MANAGER','ADMIN','investigator','manager')),
     is_active   BOOLEAN NOT NULL DEFAULT TRUE,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -50,8 +50,7 @@ CREATE TABLE IF NOT EXISTS evidence_files (
     case_id         UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
     filename        VARCHAR(512) NOT NULL,
     original_name   VARCHAR(512) NOT NULL,
-    file_type       VARCHAR(32) NOT NULL
-                      CHECK (file_type IN ('pdf','csv','image','zip','txt','whatsapp_export','other')),
+    file_type       VARCHAR(64)  NOT NULL,
     source_type     VARCHAR(32),
     file_size_bytes BIGINT,
     sha256_hash     CHAR(64) NOT NULL,
@@ -155,18 +154,9 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX idx_audit_resource ON audit_log(resource_type, resource_id);
 CREATE INDEX idx_audit_user     ON audit_log(user_id);
 
--- ── Seed: default admin user (password: CyberDrishti@2024 — change immediately) ──
--- Password hash = bcrypt of "CyberDrishti@2024"
-INSERT INTO users (username, email, hashed_password, full_name, rank, unit, role)
-VALUES (
-    'admin',
-    'admin@cyberdrishti.local',
-    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBpj5IySFSLQWW',
-    'System Administrator',
-    'DSP',
-    'Cyber Crime Cell',
-    'admin'
-) ON CONFLICT DO NOTHING;
+-- ── Users / Administrator ──────────────────────────────────────────────────
+-- Zero default users are created by SQL scripts. Administrators must be
+-- explicitly provisioned via cli.py bootstrap-admin or authenticated seed scripts.
 
 -- ── Audit genesis entry ────────────────────────────────────────────────────
 -- Inserted by the application on first startup (audit chain setup in main.py)

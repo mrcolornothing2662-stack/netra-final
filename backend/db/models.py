@@ -635,7 +635,7 @@ class AgentHold(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('awaiting_approval','approved','rejected','expired')",
+            "status IN ('awaiting_approval','held_for_review','approved','rejected','expired')",
             name="ck_agent_holds_status"
         ),
         Index("idx_agent_holds_case_id", "case_id"),

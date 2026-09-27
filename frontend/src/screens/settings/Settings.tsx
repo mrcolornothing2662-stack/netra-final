@@ -449,7 +449,7 @@ export function Settings() {
                   <div className={s.sectionCard}>
                     <div className={s.statRow}>
                       <span style={{ color: "var(--text-muted)" }}>ENCLAVE PROVIDER</span>
-                      <span style={{ color: "var(--text-primary)" }}>PKCS#11 Cryptographic Hardware Security Module</span>
+                      <span style={{ color: "var(--text-primary)" }}>Software Digest Verifier (SHA-256 Chain of Custody)</span>
                     </div>
                     <div className={s.statRow}>
                       <span style={{ color: "var(--text-muted)" }}>STATUTORY COMPLIANCE</span>
@@ -748,18 +748,18 @@ export function Settings() {
                     <div>
                       <h3 style={{ font: "500 16px var(--font-sans)", color: "var(--text-primary)" }}>NCRP 1930 Portal Connector</h3>
                       <p className="t-body-sm" style={{ color: "var(--text-secondary)", marginTop: 2 }}>
-                        National Cybercrime Reporting Portal real-time fraud complaint ingestion & freeze gateway.
+                        National Cybercrime Reporting Portal complaint ingestion & freeze gateway.
                       </p>
                     </div>
-                    <span className={`${s.badge} ${s.badgeActive}`}>CONNECTED</span>
+                    <span className={s.badge} style={{ background: "rgba(255, 170, 0, 0.15)", color: "var(--warning, #f59e0b)", border: "1px solid rgba(255, 170, 0, 0.3)" }}>SIMULATION</span>
                   </div>
                   <div className={s.statRow}>
-                    <span style={{ color: "var(--text-muted)" }}>ENDPOINT</span>
-                    <span style={{ color: "var(--text-primary)" }}>https://cybercrime.gov.in/api/v2/complaints</span>
+                    <span style={{ color: "var(--text-muted)" }}>GATEWAY STATUS</span>
+                    <span style={{ color: "var(--text-primary)" }}>Offline Demonstration Mode (Not connected to live government endpoint)</span>
                   </div>
                   <div className={s.statRow}>
                     <span style={{ color: "var(--text-muted)" }}>LEAD COMPLAINT SYNC</span>
-                    <span style={{ color: "var(--verified)" }}>Automated polling every 15 minutes</span>
+                    <span style={{ color: "var(--text-muted)" }}>Simulated case injection enabled</span>
                   </div>
                 </div>
 
@@ -768,18 +768,18 @@ export function Settings() {
                     <div>
                       <h3 style={{ font: "500 16px var(--font-sans)", color: "var(--text-primary)" }}>Telecom DoT CMS / CDR & IPDR Pipeline</h3>
                       <p className="t-body-sm" style={{ color: "var(--text-secondary)", marginTop: 2 }}>
-                        Central Monitoring System telecom data ingestion for Airtel, Jio, Vi, and BSNL cell towers.
+                        Telecom data parser for Airtel, Jio, Vi, and BSNL cell towers.
                       </p>
                     </div>
-                    <span className={`${s.badge} ${s.badgeActive}`}>READY</span>
+                    <span className={s.badge} style={{ background: "rgba(59, 130, 246, 0.15)", color: "var(--info, #3b82f6)", border: "1px solid rgba(59, 130, 246, 0.3)" }}>LOCAL PARSER</span>
                   </div>
                   <div className={s.statRow}>
                     <span style={{ color: "var(--text-muted)" }}>SUPPORTED FORMATS</span>
                     <span style={{ color: "var(--text-primary)" }}>CSV, Excel (.xlsx), ASN.1 Raw CDR, IPDR Dumps</span>
                   </div>
                   <div className={s.statRow}>
-                    <span style={{ color: "var(--text-muted)" }}>TOWER TRIANGULATION</span>
-                    <span style={{ color: "var(--verified)" }}>Active LBS GIS coordinate resolver</span>
+                    <span style={{ color: "var(--text-muted)" }}>INGESTION METHOD</span>
+                    <span style={{ color: "var(--text-primary)" }}>Manual File Ingestion (Direct Evidence Upload Only)</span>
                   </div>
                 </div>
 
@@ -788,18 +788,18 @@ export function Settings() {
                     <div>
                       <h3 style={{ font: "500 16px var(--font-sans)", color: "var(--text-primary)" }}>FIU-IND Finnet 2.0 Banking Gateway</h3>
                       <p className="t-body-sm" style={{ color: "var(--text-secondary)", marginTop: 2 }}>
-                        Financial Intelligence Unit suspicious transaction reporting (STR) & multi-bank mule tracing.
+                        Financial Intelligence Unit suspicious transaction reporting & multi-bank mule tracing.
                       </p>
                     </div>
-                    <span className={`${s.badge} ${s.badgeActive}`}>ONLINE</span>
+                    <span className={s.badge} style={{ background: "rgba(255, 170, 0, 0.15)", color: "var(--warning, #f59e0b)", border: "1px solid rgba(255, 170, 0, 0.3)" }}>SIMULATION</span>
                   </div>
                   <div className={s.statRow}>
                     <span style={{ color: "var(--text-muted)" }}>CLEARING NODES</span>
-                    <span style={{ color: "var(--text-primary)" }}>NPCI UPI / IMPS Switch, RBI NEFT/RTGS, 54 Scheduled Banks</span>
+                    <span style={{ color: "var(--text-primary)" }}>Offline Demonstration Mode (Synthetic / Simulated Bank Ledger Feed)</span>
                   </div>
                   <div className={s.statRow}>
                     <span style={{ color: "var(--text-muted)" }}>MULE LAYER TRACING</span>
-                    <span style={{ color: "var(--verified)" }}>Layer 1 to Layer 5 Automated Forward Hop Engine</span>
+                    <span style={{ color: "var(--text-primary)" }}>Deterministic graph hop analysis on ingested evidence</span>
                   </div>
                 </div>
 
@@ -808,14 +808,14 @@ export function Settings() {
                     <div>
                       <h3 style={{ font: "500 16px var(--font-sans)", color: "var(--text-primary)" }}>AI Neural Inference Engine</h3>
                       <p className="t-body-sm" style={{ color: "var(--text-secondary)", marginTop: 2 }}>
-                        Local DayaLLM inference engine, HingBERT cross-lingual NER, and hidden relationship predictor.
+                        Local inference engine, HingBERT cross-lingual NER, and hidden relationship predictor.
                       </p>
                     </div>
-                    <span className={`${s.badge} ${s.badgeActive}`}>RUNNING</span>
+                    <span className={`${s.badge} ${s.badgeActive}`}>LOCAL / FALLBACK</span>
                   </div>
                   <div className={s.statRow}>
                     <span style={{ color: "var(--text-muted)" }}>INFERENCE HOST</span>
-                    <span style={{ color: "var(--text-primary)" }}>Local Torch & PyTorch Geometric Backend</span>
+                    <span style={{ color: "var(--text-primary)" }}>Local Torch / Ollama with Deterministic Rule Fallbacks</span>
                   </div>
                   <div className={s.statRow}>
                     <span style={{ color: "var(--text-muted)" }}>STATUTORY CITATIONS</span>

@@ -646,8 +646,13 @@ class AutonomousInvestigationAgent:
             )
 
             if intercepted:
-                # Execution paused in HOLD state awaiting human supervisor
-                return
+                # Execution paused in HELD_FOR_REVIEW state awaiting human supervisor
+                return {
+                    "session_id": self.session_id,
+                    "status": "held_for_review",
+                    "actions": self.actions,
+                    "pending_hold": self.pending_hold,
+                }
 
             # Check if this completed the investigation
             if action_name == "generate_incident_assessment":
@@ -657,6 +662,13 @@ class AutonomousInvestigationAgent:
 
             # Short async pause to allow UI real-time streaming
             await asyncio.sleep(0.8)
+
+        return {
+            "session_id": self.session_id,
+            "status": self.status,
+            "actions": self.actions,
+            "pending_hold": self.pending_hold,
+        }
 
     async def _dispatch_with_armoriq(
         self,
@@ -793,23 +805,42 @@ class AutonomousInvestigationAgent:
         }
 
         await self._log_action(
-            "GOVERNANCE_BLOCK",
-            f"Action outside authorization scope was blocked (no system change made): {action}",
+            "agent.action.blocked",
+            f"Action outside authorization scope was blocked (held for review): {action}",
             {
                 "hold_id": hold_id,
                 "action": action,
+                "reason": "undeclared_external_action",
+                "governance_outcome": "blocked_by_design",
                 "armoriq_enforcement": "IntentMismatchException",
                 "enforcement_reason": str(exc),
                 "ai_reasoning": ai_thought,
                 "authorization_boundary": self.pending_hold["authorization_boundary"],
-                "governance_outcome": "blocked_by_design",
                 "system_modified": False,
                 "risk_level": "HIGH",
             },
-            status="blocked",
+            status="held_for_review",
         )
 
-        await self._set_status("awaiting_approval")
+        try:
+            from utils.audit import append_audit
+            await append_audit(
+                self.db,
+                action="AGENT_ACTION_BLOCKED",
+                resource_type="agent_session",
+                resource_id=str(self.case_id),
+                details={
+                    "action": action,
+                    "hold_id": hold_id,
+                    "reason": "undeclared_external_action",
+                    "governance_outcome": "blocked_by_design",
+                },
+            )
+            await self.db.commit()
+        except Exception as a_exc:
+            logger.warning(f"[Agent] Failed to record audit log for blocked action: {a_exc}")
+
+        await self._set_status("held_for_review")
         await self._persist_hold()
         return True
 

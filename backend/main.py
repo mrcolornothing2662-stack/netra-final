@@ -122,45 +122,42 @@ async def _ensure_audit_genesis():
 
 async def _ensure_admin_seed():
     """
-    Idempotently seed the initial administrator account.
+    Idempotently seed the initial administrator account ONLY if INITIAL_ADMIN_PASSWORD
+    is explicitly provided and the user does not exist.
 
-    Base.metadata.create_all never runs db/init_db.sql, so without this the
-    login backdoor removal in routes/auth.py would lock everyone out. Credentials
-    come from INITIAL_ADMIN_USERNAME / INITIAL_ADMIN_PASSWORD (documented dev
-    defaults in .env.example) and are stored bcrypt-hashed. If the account already
-    exists this is a no-op — the password is never reset.
+    If INITIAL_ADMIN_PASSWORD is empty or unset, no admin user is created at boot;
+    an explicit CLI (python cli.py bootstrap-admin) or authenticated seed script
+    (seed_sih_demo.py) is required.
+    Existing users are NEVER silently overwritten or have their passwords reset upon restart.
     """
     from sqlalchemy import select
     from db.models import User
     from routes.auth import _hash_password
 
-    username = settings.initial_admin_username.strip()
+    username = settings.initial_admin_username.strip() if settings.initial_admin_username else ""
     if not username:
         return
 
     password = settings.initial_admin_password
+    if not password:
+        # Safe default: No password provided -> do not create admin. Explicit bootstrap required.
+        return
 
     if settings.environment == "production":
-        if not password or password in ("", "admin123", "admin", "password", "changeme"):
-            raise RuntimeError("FATAL: In production, INITIAL_ADMIN_PASSWORD cannot be empty or a default placeholder. Use 'python cli.py bootstrap-admin'.")
-    else:
-        # Non-production / test environment default
-        if not password:
-            password = "admin123"
+        if password in ("", "admin123", "admin", "password", "changeme") or len(password) < 12:
+            raise RuntimeError(
+                "FATAL: In production, INITIAL_ADMIN_PASSWORD cannot be empty, a default placeholder, or < 12 chars. "
+                "Set a strong secret or use 'python cli.py bootstrap-admin'."
+            )
 
     async with db_context() as db:
         existing = (await db.execute(
             select(User).where(User.username == username)
         )).scalar_one_or_none()
         if existing is not None:
-            if settings.environment != "production":
-                existing.hashed_password = _hash_password(password)
-                existing.is_active = True
-                existing.failed_login_attempts = 0
-                existing.locked_until = None
-                existing.totp_enabled = False
-                existing.must_change_password = False
+            # Idempotent: Never overwrite password or reset state on restart
             return
+
         db.add(User(
             username=username,
             email=settings.initial_admin_email,

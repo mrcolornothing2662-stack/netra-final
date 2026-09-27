@@ -93,9 +93,10 @@ async def _run_agent_background(agent, session_id: str):
     """Background task wrapper for agent.run()"""
     try:
         result = await agent.run()
-        logger.info(f"[Agent] Session {session_id} completed: {result['status']}")
+        status = (result or {}).get("status", getattr(agent, "status", "unknown"))
+        logger.info(f"[Agent] Session {session_id} state: {status}")
     except Exception as exc:
-        logger.error(f"[Agent] Session {session_id} crashed: {exc}")
+        logger.error(f"[Agent] Session {session_id} error: {exc}")
 
 
 @router.get("/{case_id}/status")
