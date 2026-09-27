@@ -665,12 +665,13 @@ async def materialize_observed_relationships(
 
         key = (source.id, target.id, draft.relationship_type, draft.epistemic_status)
         existing = rel_map.get(key)
-        # Phase 3 Graph Edge Provenance Enforcement
+        # Phase 3 & 4 Graph Edge Provenance Enforcement (Fail-Closed: No provenance, no intelligence)
+        from orchestration.provenance import ProvenanceError
         edge_attrs = dict(draft.attributes or {})
         try:
             edge_attrs["canonical_provenance"] = draft.to_provenance_record().to_dict()
-        except Exception:
-            pass
+        except Exception as exc:
+            raise ProvenanceError(f"Graph edge provenance generation failed for {draft.source_value}->{draft.target_value}: {exc}") from exc
 
         if existing is None:
             row = Relationship(

@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Awaitable, Callable, Iterable, Sequence, Union
 from orchestration.provenance import (
+    ProvenanceError,
     CanonicalProvenanceRecord,
     EpistemicStatus as CanonicalEpistemicStatus,
     ProvenanceType,
@@ -145,8 +146,8 @@ class NormalizedEvent:
         d = asdict(self)
         try:
             d["canonical_provenance"] = self.to_provenance_record().to_dict()
-        except Exception:
-            pass
+        except Exception as exc:
+            raise ProvenanceError(f"NormalizedEvent provenance generation failed: {exc}") from exc
         return d
 
 
@@ -236,8 +237,8 @@ class CognitiveResult:
         data["fingerprint"] = self.fingerprint()
         try:
             data["canonical_provenance"] = self.to_provenance_record().to_dict()
-        except Exception:
-            pass
+        except Exception as exc:
+            raise ProvenanceError(f"CognitiveResult provenance generation failed for {self.finding_type}: {exc}") from exc
         return data
 
 
